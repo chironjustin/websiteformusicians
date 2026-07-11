@@ -42,20 +42,23 @@ Vite outputs to `dist`.
 1. Create a Supabase project.
 2. In the SQL editor, run `supabase/schema.sql`.
 3. In the SQL editor, run `supabase/chat-schema.sql`.
-4. Create these Storage buckets:
+4. In the SQL editor, run `supabase/event-status-cron.sql`.
+5. Create these Storage buckets:
    - `artist-images` public
    - `artwork` public
    - `merch-images` public
    - `audio` private
-5. In the SQL editor, run `supabase/storage-policies.sql` after the buckets exist.
-6. Enable email/password Auth.
-7. Create the first admin user in Supabase Auth.
-8. Optionally enable Realtime for `public.events` and `public.chat_messages`.
-9. Add the same `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` values locally and in Vercel.
+6. In the SQL editor, run `supabase/storage-policies.sql` after the buckets exist.
+7. Enable email/password Auth.
+8. Create the first admin user in Supabase Auth.
+9. Enable Realtime for `public.events` and optionally `public.chat_messages`.
+10. Add the same `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` values locally and in Vercel.
 
 The private `audio` bucket is not publicly readable. Authenticated event owners still need SELECT access to their own `user-id/event-id/file` objects so Supabase can create signed admin preview and playback URLs.
 
 Event timestamps are stored as UTC `timestamptz` values. The admin editor converts them to local browser time for `datetime-local` inputs and converts local input back to UTC when saving.
+
+Scheduled events use Supabase Cron as the authoritative status scheduler. The selected `starts_at` timestamp controls when an event becomes `live`; `duration_hours` is used only to calculate `ends_at`, which controls when the event becomes `finished`. The cron job in `supabase/event-status-cron.sql` runs every minute and Realtime delivers those database changes to open public/admin clients.
 
 ## Moderated Chat
 

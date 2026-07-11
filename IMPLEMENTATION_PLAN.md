@@ -52,13 +52,14 @@
 - Moved public chat out of the main teaser column into a neon slide-out drawer opened from the status panel, preserving the original teaser layout while keeping approved chat history and visitor submission available.
 - Verified by build that desktop/mobile responsive constraints remain CSS-driven through the original clamp/max viewport sizing.
 
-## Automatic timing TODO
+## Automatic timing implementation
 
-The client can safely display an upcoming event as live once `starts_at` is reached, but it must not be trusted to persist scheduled status transitions. Fully reliable automatic database status changes require a trusted scheduler, such as:
-
-- Supabase scheduled Edge Functions
-- Supabase Cron
-- a scheduled Vercel Function
-- another trusted backend scheduler
-
-For this integration, the app will support manual `Start Now` and `End Now` actions from the authenticated admin dashboard without triggering Vercel redeployments.
+- `starts_at` is the timestamp when an event becomes live.
+- `ends_at` is the timestamp when an event becomes finished.
+- `duration_hours` is used only to calculate `ends_at` from `starts_at`; it is never the upcoming countdown target.
+- Upcoming public countdowns target `starts_at`.
+- Live public countdowns target `ends_at`.
+- `supabase/event-status-cron.sql` creates `public.update_scheduled_event_statuses()` and schedules the `update-event-statuses` Supabase Cron job to run every minute.
+- The cron job changes `upcoming` events to `live` when `starts_at <= now()` and changes `upcoming` or `live` events to `finished` when `ends_at <= now()`.
+- Realtime on `public.events` delivers cron-driven status changes to open public/admin clients without a page refresh or Vercel redeployment.
+- The public page includes a display-only effective-state fallback so it can visually show the live page between the selected start time and the next cron run. Anonymous clients never write status changes.

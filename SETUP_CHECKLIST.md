@@ -7,13 +7,15 @@
 - [ ] Create the first admin user in Supabase Auth.
 - [ ] Run `supabase/schema.sql` in the SQL editor.
 - [ ] Run `supabase/chat-schema.sql` in the SQL editor.
+- [ ] Run `supabase/event-status-cron.sql` in the SQL editor.
+- [ ] Confirm Supabase Cron is enabled/available and the `update-event-statuses` job runs every minute.
 - [ ] Create Storage bucket `artist-images` as public.
 - [ ] Create Storage bucket `artwork` as public.
 - [ ] Create Storage bucket `merch-images` as public.
 - [ ] Create Storage bucket `audio` as private.
 - [ ] Run `supabase/storage-policies.sql` after creating buckets.
 - [ ] Confirm authenticated users can SELECT their own scoped storage files so private audio signed URLs can be created.
-- [ ] Optionally enable Realtime for `public.events`.
+- [ ] Enable Realtime for `public.events`.
 - [ ] Optionally enable Realtime for `public.chat_messages`.
 - [ ] Copy the project URL into `VITE_SUPABASE_URL`.
 - [ ] Copy the anon public key into `VITE_SUPABASE_ANON_KEY`.
