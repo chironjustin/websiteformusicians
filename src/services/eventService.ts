@@ -86,12 +86,13 @@ export async function startEvent(id: string, latest?: UpdateEventInput) {
   const existing = await getEventById(id);
   if (!existing) throw new Error("Event not found.");
 
-  const now = new Date().toISOString();
-  const candidate = { ...existing, ...latest, starts_at: now };
-  const endsAt = calculateEndsAt(now, candidate.duration_hours);
+  const now = new Date();
+  const startsAt = now.toISOString();
+  const candidate = { ...existing, ...latest, starts_at: startsAt };
+  const endsAt = calculateEndsAt(startsAt, candidate.duration_hours);
   validateStartable({ ...candidate, ends_at: endsAt });
 
-  return updateEvent(id, { ...latest, status: "live", starts_at: now, ends_at: endsAt });
+  return updateEvent(id, { ...latest, status: "live", starts_at: startsAt, ends_at: endsAt });
 }
 
 export async function endEvent(id: string) {
@@ -102,7 +103,7 @@ export async function scheduleEvent(id: string, input: UpdateEventInput) {
   if (!input.starts_at) throw new Error("Choose a future start date and time.");
   if (new Date(input.starts_at).getTime() <= Date.now()) throw new Error("Scheduled start time must be in the future.");
   validateStartable(input);
-  const endsAt = input.ends_at ?? calculateEndsAt(input.starts_at, input.duration_hours);
+  const endsAt = calculateEndsAt(input.starts_at, input.duration_hours);
   return updateEvent(id, { ...input, status: "upcoming", ends_at: endsAt });
 }
 

@@ -237,7 +237,10 @@ export default function AdminPage() {
       setError("Upload audio and artwork or an artist image before scheduling.");
       return;
     }
-    await runAction("Event scheduled.", async (baseEvent, updates) => scheduleEvent(baseEvent.id, updates));
+    await runAction(
+      `Event scheduled for ${formatAdminDateTime(form.starts_at)}.`,
+      async (baseEvent, updates) => scheduleEvent(baseEvent.id, updates),
+    );
   }
 
   async function handleStartNow() {
@@ -412,6 +415,16 @@ function fromEvent(event: MusicEvent): FormState {
     merch_url: event.merch_url ?? "",
     event_url: event.event_url ?? "",
   };
+}
+
+function formatAdminDateTime(value: string) {
+  if (!value) return "the selected time";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "the selected time";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function useObjectUrl(file: File | null) {

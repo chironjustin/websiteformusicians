@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getEventDisplayState, getLiveCountdownTarget, getRemainingMilliseconds, getUpcomingCountdownTarget } from "@/lib/eventTiming";
+import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemainingMilliseconds } from "@/lib/eventTiming";
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
 import { sendVisitorMessage } from "@/services/chatService";
@@ -19,12 +19,7 @@ function pad2(value: number) {
 }
 
 function splitMs(ms: number) {
-  const seconds = Math.floor(ms / 1000);
-  return {
-    hours: Math.floor(seconds / 3600),
-    minutes: Math.floor((seconds % 3600) / 60),
-    seconds: seconds % 60,
-  };
+  return formatCountdown(ms);
 }
 
 function fmtSecs(seconds: number) {
@@ -320,6 +315,8 @@ export default function PublicEventPage() {
   const [chatOpen, setChatOpen] = useState(false);
   const chat = useEventChat(event?.id, "public");
   const state = event ? getEventDisplayState(event, now) : "upcoming";
+  const authoritativeState = event?.status ?? "upcoming";
+  const waitingForLiveStatus = state === "live" && authoritativeState === "upcoming";
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -372,20 +369,20 @@ export default function PublicEventPage() {
   }
 
   const title = event.title.toLowerCase();
-  const upcomingTarget = getUpcomingCountdownTarget(event);
-  const liveTarget = getLiveCountdownTarget(event);
+  const countdownTarget = getCountdownTarget(event, state);
 
   return (
     <Shell state={state} chatOpen={chatOpen} onToggleChat={() => setChatOpen(open => !open)}>
       {state !== "finished" && <DVDBounce imageUrl={images.artist} />}
-      {state === "upcoming" && <UpcomingPage title={title} artworkUrl={images.artwork} startsAt={upcomingTarget} />}
-      {state === "live" && <LivePage title={title} artworkUrl={images.artwork} audioUrl={audioUrl} liveTarget={liveTarget} />}
+      {state === "upcoming" && <UpcomingPage title={title} artworkUrl={images.artwork} startsAt={countdownTarget} />}
+      {state === "live" && <LivePage title={title} artworkUrl={images.artwork} audioUrl={audioUrl} liveTarget={countdownTarget} waitingForLiveStatus={waitingForLiveStatus} />}
       {state === "finished" && <FinishedPage event={event} title={title} merchImage={images.merch} />}
       <ChatDrawer
         eventId={event.id}
         messages={chat.messages}
         open={chatOpen}
-        live={state === "live"}
+        live={authoritativeState === "live"}
+        starting={waitingForLiveStatus}
         onClose={() => setChatOpen(false)}
       />
     </Shell>
@@ -418,7 +415,7 @@ function UpcomingPage({ title, artworkUrl, startsAt }: { title: string; artworkU
   );
 }
 
-function LivePage({ title, artworkUrl, audioUrl, liveTarget }: { title: string; artworkUrl: string; audioUrl: string; liveTarget: string | null }) {
+function LivePage({ title, artworkUrl, audioUrl, liveTarget, waitingForLiveStatus }: { title: string; artworkUrl: string; audioUrl: string; liveTarget: string | null; waitingForLiveStatus: boolean }) {
   return (
     <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: "clamp(1.25rem, 4vh, 2.5rem)", padding: "2rem", width: "min(640px, 92vw)" }}>
@@ -427,6 +424,11 @@ function LivePage({ title, artworkUrl, audioUrl, liveTarget }: { title: string; 
           {title}
         </p>
         <Artwork size={320} imageUrl={artworkUrl} />
+        {waitingForLiveStatus && (
+          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em" }}>
+            event is starting...
+          </p>
+        )}
         {audioUrl && (
           <div style={{ width: "100%", maxWidth: 480 }}>
             <AudioPlayer audioUrl={audioUrl} />
@@ -503,7 +505,7 @@ function FinishedPage({ event, title, merchImage }: { event: MusicEvent; title: 
   );
 }
 
-function ChatDrawer({ eventId, messages, open, live, onClose }: { eventId: string; messages: ChatMessage[]; open: boolean; live: boolean; onClose: () => void }) {
+function ChatDrawer({ eventId, messages, open, live, starting, onClose }: { eventId: string; messages: ChatMessage[]; open: boolean; live: boolean; starting: boolean; onClose: () => void }) {
   const [displayName, setDisplayName] = useState("");
   const [body, setBody] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -589,7 +591,9 @@ function ChatDrawer({ eventId, messages, open, live, onClose }: { eventId: strin
           {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem" }}>{error}</p>}
         </form>
       ) : (
-        <p style={{ borderTop: "1px solid rgba(0,255,65,0.18)", paddingTop: "0.75rem", fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "1.05rem" }}>chat is closed.</p>
+        <p style={{ borderTop: "1px solid rgba(0,255,65,0.18)", paddingTop: "0.75rem", fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "1.05rem" }}>
+          {starting ? "event is starting. chat will open in a moment." : "chat is closed."}
+        </p>
       )}
     </aside>
   );
