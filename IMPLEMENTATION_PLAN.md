@@ -45,6 +45,13 @@
 - Added realtime chat hooks and services for public approved chat history and owner-only moderation.
 - Added admin Chat tab moderation actions and public live/finished chat views.
 
+## Public design restoration notes
+
+- Restored the original Figma-generated public visual structure from the pre-integration `src/app/App.tsx`: black full-screen background, CRT overlay, pixel typography, large centered countdown, centered artwork, neon-green corner treatment, bouncing artist image, and compact right/bottom status panel.
+- Kept the restored visual components wired to Supabase-backed event data, storage public image URLs, and private signed audio URLs.
+- Moved public chat out of the main teaser column into a neon slide-out drawer opened from the status panel, preserving the original teaser layout while keeping approved chat history and visitor submission available.
+- Verified by build that desktop/mobile responsive constraints remain CSS-driven through the original clamp/max viewport sizing.
+
 ## Automatic timing TODO
 
 The client can safely display an upcoming event as live once `starts_at` is reached, but it must not be trusted to persist scheduled status transitions. Fully reliable automatic database status changes require a trusted scheduler, such as:
