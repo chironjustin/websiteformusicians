@@ -1,11 +1,17 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Radio } from "lucide-react";
+import { dateTimeLocalToUtc, formatDateTimeLocal } from "@/lib/datetime";
+import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
+import { deleteChatMessage, sendAdminMessage, setMessageStatus, updateMessageFlags } from "@/services/chatService";
 import { createEvent, endEvent, getAdminEvents, scheduleEvent, startEvent, updateEvent } from "@/services/eventService";
 import { uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage } from "@/services/storageService";
+import type { ChatMessage } from "@/types/chat";
 import type { MusicEvent, UpdateEventInput } from "@/types/event";
 import FilePicker from "@/components/admin/FilePicker";
 import EventStatusBadge from "@/components/public/EventStatusBadge";
+
+type AdminTab = "event" | "chat";
 
 type FormState = {
   title: string;
@@ -50,6 +56,8 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
+  const [activeTab, setActiveTab] = useState<AdminTab>("event");
+  const chat = useEventChat(event?.id, "admin");
 
   useEffect(() => {
     getAdminEvents()
@@ -119,7 +127,7 @@ export default function AdminPage() {
   }
 
   function toUpdateInput(extra?: UpdateEventInput): UpdateEventInput {
-    const startsAt = form.starts_at ? new Date(form.starts_at).toISOString() : null;
+    const startsAt = dateTimeLocalToUtc(form.starts_at);
     const duration = Number.parseFloat(form.duration_hours);
     return {
       title: form.title.trim() || "Untitled Event",
@@ -213,41 +221,63 @@ export default function AdminPage() {
         <button onClick={() => logout()} style={secondaryButton}>Logout</button>
       </header>
 
-      <form onSubmit={handleSaveDraft} style={{ padding: 24, maxWidth: 680, display: "flex", flexDirection: "column", gap: 20 }}>
-        <Panel title="Event Controls">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-            <button disabled={disabled} type="submit" style={buttonStyle("#374151")}>Save Draft</button>
-            <button disabled={disabled} type="button" onClick={handleSchedule} style={buttonStyle("#0f766e")}>Schedule Event</button>
-            <button disabled={disabled} type="button" onClick={handleStartNow} style={buttonStyle("#6366f1")}>Start Now</button>
-            <button disabled={disabled || !event} type="button" onClick={handleEndNow} style={buttonStyle("#ef4444")}>End Now</button>
-          </div>
-          {uploadStatus && <p style={noteStyle}>{uploadStatus}</p>}
-          {message && <p style={{ ...noteStyle, color: "#15803d" }}>{message}</p>}
-          {error && <p style={{ ...noteStyle, color: "#b91c1c" }}>{error}</p>}
-        </Panel>
+      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", display: "flex", padding: "0 16px" }}>
+        {(["event", "chat"] as AdminTab[]).map(tab => (
+          <button key={tab} type="button" onClick={() => setActiveTab(tab)} style={tabButtonStyle(activeTab === tab)}>
+            {tab === "event" ? "Event" : `Chat${chat.grouped.pending.length > 0 ? ` (${chat.grouped.pending.length})` : ""}`}
+          </button>
+        ))}
+      </div>
 
-        <Panel title="Song Info">
-          <Grid>
-            <Field label="Event Title" value={form.title} onChange={value => setField("title", value)} />
-            <Field label="Artist Name" value={form.artist_name} onChange={value => setField("artist_name", value)} />
-            <Field label="Start Date and Time" type="datetime-local" value={form.starts_at} onChange={value => setField("starts_at", value)} />
-            <Field label="Duration (hours)" type="number" value={form.duration_hours} onChange={value => setField("duration_hours", value)} />
-          </Grid>
-        </Panel>
+      {activeTab === "event" ? (
+        <form onSubmit={handleSaveDraft} style={{ padding: 24, maxWidth: 680, display: "flex", flexDirection: "column", gap: 20 }}>
+          <Panel title="Event Controls">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+              <button disabled={disabled} type="submit" style={buttonStyle("#374151")}>Save Draft</button>
+              <button disabled={disabled} type="button" onClick={handleSchedule} style={buttonStyle("#0f766e")}>Schedule Event</button>
+              <button disabled={disabled} type="button" onClick={handleStartNow} style={buttonStyle("#6366f1")}>Start Now</button>
+              <button disabled={disabled || !event} type="button" onClick={handleEndNow} style={buttonStyle("#ef4444")}>End Now</button>
+            </div>
+            {uploadStatus && <p style={noteStyle}>{uploadStatus}</p>}
+            {message && <p style={{ ...noteStyle, color: "#15803d" }}>{message}</p>}
+            {error && <p style={{ ...noteStyle, color: "#b91c1c" }}>{error}</p>}
+          </Panel>
 
-        <FilePicker label="Song File" hint="MP3, WAV, OGG, FLAC, M4A. Audio remains private and uses signed URLs." accept="audio/*" disabled={disabled} currentLabel={fileLabels.audio} pendingFile={pendingFiles.audio} onFile={file => setPendingFiles(current => ({ ...current, audio: file }))} />
-        <FilePicker label="Artwork" hint="JPG, PNG, GIF, WEBP. Shown on the upcoming page." accept="image/*" disabled={disabled} currentLabel={fileLabels.artwork} pendingFile={pendingFiles.artwork} onFile={file => setPendingFiles(current => ({ ...current, artwork: file }))} />
-        <FilePicker label="Artist Image" hint="JPG, PNG, GIF, WEBP. Used on the teaser page." accept="image/*" disabled={disabled} currentLabel={fileLabels.artistImage} pendingFile={pendingFiles.artistImage} onFile={file => setPendingFiles(current => ({ ...current, artistImage: file }))} />
-        <FilePicker label="Merch Image" hint="JPG, PNG, GIF, WEBP. Used after the event finishes." accept="image/*" disabled={disabled} currentLabel={fileLabels.merchImage} pendingFile={pendingFiles.merchImage} onFile={file => setPendingFiles(current => ({ ...current, merchImage: file }))} />
+          <Panel title="Song Info">
+            <Grid>
+              <Field label="Event Title" value={form.title} onChange={value => setField("title", value)} />
+              <Field label="Artist Name" value={form.artist_name} onChange={value => setField("artist_name", value)} />
+              <Field label="Start Date and Time" type="datetime-local" value={form.starts_at} onChange={value => setField("starts_at", value)} />
+              <Field label="Duration (hours)" type="number" value={form.duration_hours} onChange={value => setField("duration_hours", value)} />
+            </Grid>
+          </Panel>
 
-        <Panel title="Support Links">
-          <Grid>
-            <Field label="Support URL" value={form.support_url} onChange={value => setField("support_url", value)} />
-            <Field label="Merchandise URL" value={form.merch_url} onChange={value => setField("merch_url", value)} />
-            <Field label="Event URL" value={form.event_url} onChange={value => setField("event_url", value)} />
-          </Grid>
-        </Panel>
-      </form>
+          <FilePicker label="Song File" hint="MP3, WAV, OGG, FLAC, M4A. Audio remains private and uses signed URLs." accept="audio/*" disabled={disabled} currentLabel={fileLabels.audio} pendingFile={pendingFiles.audio} onFile={file => setPendingFiles(current => ({ ...current, audio: file }))} />
+          <FilePicker label="Artwork" hint="JPG, PNG, GIF, WEBP. Shown on the upcoming page." accept="image/*" disabled={disabled} currentLabel={fileLabels.artwork} pendingFile={pendingFiles.artwork} onFile={file => setPendingFiles(current => ({ ...current, artwork: file }))} />
+          <FilePicker label="Artist Image" hint="JPG, PNG, GIF, WEBP. Used on the teaser page." accept="image/*" disabled={disabled} currentLabel={fileLabels.artistImage} pendingFile={pendingFiles.artistImage} onFile={file => setPendingFiles(current => ({ ...current, artistImage: file }))} />
+          <FilePicker label="Merch Image" hint="JPG, PNG, GIF, WEBP. Used after the event finishes." accept="image/*" disabled={disabled} currentLabel={fileLabels.merchImage} pendingFile={pendingFiles.merchImage} onFile={file => setPendingFiles(current => ({ ...current, merchImage: file }))} />
+
+          <Panel title="Support Links">
+            <Grid>
+              <Field label="Support URL" value={form.support_url} onChange={value => setField("support_url", value)} />
+              <Field label="Merchandise URL" value={form.merch_url} onChange={value => setField("merch_url", value)} />
+              <Field label="Event URL" value={form.event_url} onChange={value => setField("event_url", value)} />
+            </Grid>
+          </Panel>
+        </form>
+      ) : (
+        <ChatModerationPanel
+          event={event}
+          ensureEvent={ensureEvent}
+          chat={chat}
+          busy={busy}
+          setBusy={setBusy}
+          setError={setError}
+          setMessage={setMessage}
+          error={error}
+          message={message}
+        />
+      )}
     </main>
   );
 }
@@ -256,12 +286,143 @@ function fromEvent(event: MusicEvent): FormState {
   return {
     title: event.title ?? "",
     artist_name: event.artist_name ?? "",
-    starts_at: event.starts_at ? event.starts_at.slice(0, 16) : "",
+    starts_at: formatDateTimeLocal(event.starts_at),
     duration_hours: event.duration_hours ? String(event.duration_hours) : "12",
     support_url: event.support_url ?? "",
     merch_url: event.merch_url ?? "",
     event_url: event.event_url ?? "",
   };
+}
+
+function ChatModerationPanel({
+  event,
+  ensureEvent,
+  chat,
+  busy,
+  setBusy,
+  setError,
+  setMessage,
+  error,
+  message,
+}: {
+  event: MusicEvent | null;
+  ensureEvent: () => Promise<MusicEvent>;
+  chat: ReturnType<typeof useEventChat>;
+  busy: boolean;
+  setBusy: (busy: boolean) => void;
+  setError: (error: string) => void;
+  setMessage: (message: string) => void;
+  error: string;
+  message: string;
+}) {
+  const [body, setBody] = useState("");
+
+  async function run(label: string, action: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      await action();
+      await chat.refetch();
+      setMessage(label);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update chat.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitAdminMessage(submitEvent: FormEvent) {
+    submitEvent.preventDefault();
+    await run("Admin message published.", async () => {
+      const baseEvent = event ?? await ensureEvent();
+      await sendAdminMessage({ event_id: baseEvent.id, body });
+      setBody("");
+    });
+  }
+
+  return (
+    <div style={{ padding: 24, maxWidth: 760, display: "flex", flexDirection: "column", gap: 20 }}>
+      <Panel title="Composer">
+        <form onSubmit={submitAdminMessage} style={{ display: "flex", gap: 8 }}>
+          <input
+            value={body}
+            onChange={event => setBody(event.target.value)}
+            maxLength={500}
+            placeholder={event ? "Write an admin message..." : "Save or create an event to start chat..."}
+            style={inputStyle}
+          />
+          <button disabled={busy || !body.trim()} type="submit" style={buttonStyle("#6366f1")}>Publish</button>
+        </form>
+        {chat.loading && <p style={noteStyle}>Loading chat...</p>}
+        {chat.error && <p style={{ ...noteStyle, color: "#b91c1c" }}>{chat.error}</p>}
+        {message && <p style={{ ...noteStyle, color: "#15803d" }}>{message}</p>}
+        {error && <p style={{ ...noteStyle, color: "#b91c1c" }}>{error}</p>}
+      </Panel>
+
+      <ChatSection title="Pending Messages" empty="No pending messages." messages={chat.grouped.pending}>
+        {messageItem => (
+          <>
+            <SmallButton disabled={busy} onClick={() => run("Message approved.", () => setMessageStatus(messageItem.id, "approved").then(() => undefined))}>Approve</SmallButton>
+            <SmallButton disabled={busy} color="#ef4444" onClick={() => run("Message rejected.", () => setMessageStatus(messageItem.id, "rejected").then(() => undefined))}>Reject</SmallButton>
+            <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(messageItem.id))}>Delete</SmallButton>
+          </>
+        )}
+      </ChatSection>
+
+      <ChatSection title="Approved Messages" empty="No approved messages." messages={chat.grouped.approved}>
+        {messageItem => (
+          <>
+            <SmallButton disabled={busy} onClick={() => run(messageItem.is_pinned ? "Message unpinned." : "Message pinned.", () => updateMessageFlags(messageItem.id, { is_pinned: !messageItem.is_pinned }).then(() => undefined))}>{messageItem.is_pinned ? "Unpin" : "Pin"}</SmallButton>
+            <SmallButton disabled={busy} onClick={() => run(messageItem.is_highlighted ? "Highlight removed." : "Message highlighted.", () => updateMessageFlags(messageItem.id, { is_highlighted: !messageItem.is_highlighted }).then(() => undefined))}>{messageItem.is_highlighted ? "Remove Highlight" : "Highlight"}</SmallButton>
+            <SmallButton disabled={busy} onClick={() => run(messageItem.is_liked ? "Like removed." : "Message liked.", () => updateMessageFlags(messageItem.id, { is_liked: !messageItem.is_liked }).then(() => undefined))}>{messageItem.is_liked ? "Unlike" : "Like"}</SmallButton>
+            <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(messageItem.id))}>Delete</SmallButton>
+          </>
+        )}
+      </ChatSection>
+
+      <ChatSection title="Rejected Messages" empty="No rejected messages." messages={chat.grouped.rejected}>
+        {messageItem => (
+          <>
+            <SmallButton disabled={busy} onClick={() => run("Message approved.", () => setMessageStatus(messageItem.id, "approved").then(() => undefined))}>Approve</SmallButton>
+            <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(messageItem.id))}>Delete</SmallButton>
+          </>
+        )}
+      </ChatSection>
+    </div>
+  );
+}
+
+function ChatSection({ title, empty, messages, children }: { title: string; empty: string; messages: ChatMessage[]; children: (message: ChatMessage) => React.ReactNode }) {
+  return (
+    <Panel title={`${title} (${messages.length})`}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {messages.length === 0 && <p style={{ fontSize: 13, color: "#9ca3af" }}>{empty}</p>}
+        {messages.map(message => (
+          <div key={message.id} style={chatMessageStyle(message)}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <strong style={{ fontSize: 12 }}>{message.display_name}</strong>
+              {message.is_admin && <span style={badgeStyle}>Admin</span>}
+              {message.is_pinned && <span style={badgeStyle}>Pinned</span>}
+              {message.is_liked && <span style={badgeStyle}>Liked</span>}
+            </div>
+            <p style={{ fontSize: 13, color: "#374151", overflowWrap: "anywhere" }}>{message.body}</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {children(message)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function SmallButton({ children, onClick, disabled, color = "#6366f1" }: { children: React.ReactNode; onClick: () => void; disabled?: boolean; color?: string }) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick} style={{ fontSize: 12, padding: "4px 9px", border: "none", borderRadius: 4, background: color, color: "#fff", fontWeight: 600 }}>
+      {children}
+    </button>
+  );
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
@@ -317,6 +478,38 @@ const secondaryButton: React.CSSProperties = {
   borderRadius: 6,
   fontWeight: 600,
 };
+
+const badgeStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  background: "#eef2ff",
+  color: "#4338ca",
+  borderRadius: 999,
+  padding: "1px 6px",
+};
+
+function tabButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: "10px 16px",
+    fontSize: 13,
+    background: "none",
+    border: "none",
+    borderBottom: active ? "2px solid #6366f1" : "2px solid transparent",
+    color: active ? "#6366f1" : "#6b7280",
+    fontWeight: active ? 600 : 400,
+  };
+}
+
+function chatMessageStyle(message: ChatMessage): React.CSSProperties {
+  return {
+    border: "1px solid #e5e7eb",
+    borderLeft: message.is_highlighted ? "4px solid #6366f1" : "3px solid #d1d5db",
+    borderRadius: 6,
+    padding: "10px 12px",
+    background: message.is_highlighted ? "#eef2ff" : "#fff",
+  };
+}
 
 function buttonStyle(background: string): React.CSSProperties {
   return {

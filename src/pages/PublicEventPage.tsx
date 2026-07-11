@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
+import { sendVisitorMessage } from "@/services/chatService";
 import { getPublicImageUrl, getSignedAudioUrl } from "@/services/storageService";
+import type { ChatMessage } from "@/types/chat";
 import type { MusicEvent } from "@/types/event";
 
 const GREEN = "#00FF41";
@@ -63,6 +66,7 @@ export default function PublicEventPage() {
   const { event, loading, error } = useCurrentEvent();
   const [audioUrl, setAudioUrl] = useState("");
   const [now, setNow] = useState(new Date());
+  const chat = useEventChat(event?.id, "public");
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -127,6 +131,7 @@ export default function PublicEventPage() {
           <p style={{ fontFamily: VT, fontSize: "clamp(1.5rem, 5vw, 2.8rem)", color: GREEN }}>{title}</p>
           <Artwork src={images.artwork} />
           {audioUrl ? <AudioPlayer src={audioUrl} /> : <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.5)" }}>audio unavailable.</p>}
+          <PublicChat eventId={event.id} messages={chat.messages} live />
         </section>
       </Shell>
     );
@@ -139,6 +144,7 @@ export default function PublicEventPage() {
         <p style={{ fontFamily: VT, fontSize: "clamp(1.2rem, 4vw, 2rem)", color: "#fff" }}>{title}</p>
         {images.merch && <img src={images.merch} alt="Merchandise" style={{ width: 160, height: 160, objectFit: "cover", border: `2px solid ${GREEN}` }} />}
         <LinkList event={event} />
+        <PublicChat eventId={event.id} messages={chat.messages} live={false} />
       </section>
     </Shell>
   );
@@ -181,3 +187,97 @@ function LinkList({ event }: { event: MusicEvent }) {
     </div>
   );
 }
+
+function PublicChat({ eventId, messages, live }: { eventId: string; messages: ChatMessage[]; live: boolean }) {
+  const [displayName, setDisplayName] = useState("");
+  const [body, setBody] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+  const [lastSentAt, setLastSentAt] = useState(0);
+
+  async function submitMessage(event: React.FormEvent) {
+    event.preventDefault();
+    if (!live || sending) return;
+    const now = Date.now();
+    if (now - lastSentAt < 8_000) {
+      setError("wait a few seconds before sending another message.");
+      return;
+    }
+
+    setSending(true);
+    setError("");
+    setFeedback("");
+    try {
+      await sendVisitorMessage({ event_id: eventId, display_name: displayName, body });
+      setBody("");
+      setLastSentAt(now);
+      setFeedback("message sent for approval.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message.toLowerCase() : "message failed.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <section style={{ borderTop: "1px solid rgba(0,255,65,0.18)", paddingTop: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+      <p style={{ fontFamily: VT, color: GREEN, fontSize: 24 }}>live chat</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 260, overflowY: "auto" }}>
+        {messages.length === 0 && <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: 18 }}>no approved messages yet.</p>}
+        {messages.map(message => (
+          <div key={message.id} style={{
+            border: `1px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.18)"}`,
+            padding: "8px 10px",
+            background: message.is_highlighted ? "rgba(0,255,65,0.08)" : "transparent",
+            order: message.is_pinned ? -1 : 0,
+          }}>
+            <p style={{ fontFamily: VT, color: GREEN, fontSize: 16 }}>
+              {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
+            </p>
+            <p style={{ fontFamily: VT, color: "#fff", fontSize: 19, overflowWrap: "anywhere" }}>{message.body}</p>
+          </div>
+        ))}
+      </div>
+
+      {live ? (
+        <form onSubmit={submitMessage} style={{ display: "grid", gap: 8 }}>
+          <input
+            value={displayName}
+            onChange={event => setDisplayName(event.target.value)}
+            maxLength={50}
+            placeholder="name"
+            style={chatInputStyle}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={body}
+              onChange={event => setBody(event.target.value)}
+              maxLength={500}
+              placeholder="message..."
+              style={chatInputStyle}
+            />
+            <button disabled={sending || !displayName.trim() || !body.trim()} style={{ fontFamily: VT, background: GREEN, color: BG, border: "none", padding: "0 14px", fontSize: 18 }}>
+              send
+            </button>
+          </div>
+          {feedback && <p style={{ fontFamily: VT, color: GREEN, fontSize: 16 }}>{feedback}</p>}
+          {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: 16 }}>{error}</p>}
+        </form>
+      ) : (
+        <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: 18 }}>chat is closed.</p>
+      )}
+    </section>
+  );
+}
+
+const chatInputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  background: "transparent",
+  color: "#fff",
+  border: "1px solid rgba(0,255,65,0.35)",
+  padding: "8px 10px",
+  fontFamily: VT,
+  fontSize: 18,
+};
