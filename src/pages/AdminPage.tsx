@@ -5,7 +5,7 @@ import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
 import { deleteChatMessage, sendAdminMessage, setMessageStatus, updateMessageFlags } from "@/services/chatService";
 import { createEvent, endEvent, getAdminEvents, scheduleEvent, startEvent, updateEvent } from "@/services/eventService";
-import { uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage } from "@/services/storageService";
+import { getPublicImageUrl, getSignedAudioUrl, uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage } from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
 import type { MusicEvent, UpdateEventInput } from "@/types/event";
 import FilePicker from "@/components/admin/FilePicker";
@@ -56,8 +56,16 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState("");
+  const [audioPreviewLoading, setAudioPreviewLoading] = useState(false);
+  const [audioPreviewError, setAudioPreviewError] = useState("");
+  const [artworkWarning, setArtworkWarning] = useState("");
   const [activeTab, setActiveTab] = useState<AdminTab>("event");
   const chat = useEventChat(event?.id, "admin");
+  const localArtistImageUrl = useObjectUrl(pendingFiles.artistImage);
+  const localArtworkUrl = useObjectUrl(pendingFiles.artwork);
+  const localMerchImageUrl = useObjectUrl(pendingFiles.merchImage);
+  const localAudioUrl = useObjectUrl(pendingFiles.audio);
 
   useEffect(() => {
     getAdminEvents()
@@ -72,6 +80,60 @@ export default function AdminPage() {
 
   const disabled = loading || busy;
   const hasRequiredMedia = Boolean(event?.audio_path || pendingFiles.audio) && Boolean(event?.artwork_path || event?.artist_image_path || pendingFiles.artwork || pendingFiles.artistImage);
+
+  useEffect(() => {
+    if (localAudioUrl) {
+      setAudioPreviewUrl("");
+      setAudioPreviewError("");
+      setAudioPreviewLoading(false);
+      return;
+    }
+
+    let active = true;
+    setAudioPreviewUrl("");
+    setAudioPreviewError("");
+
+    if (!event?.audio_path) return;
+
+    setAudioPreviewLoading(true);
+    getSignedAudioUrl(event.audio_path)
+      .then(url => {
+        if (active) setAudioPreviewUrl(url);
+      })
+      .catch(() => {
+        if (active) setAudioPreviewError("Unable to load private audio preview.");
+      })
+      .finally(() => {
+        if (active) setAudioPreviewLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [event?.audio_path, localAudioUrl]);
+
+  useEffect(() => {
+    if (!localArtworkUrl) {
+      setArtworkWarning("");
+      return;
+    }
+
+    let active = true;
+    const image = new Image();
+    image.onload = () => {
+      if (!active || image.naturalHeight === 0) return;
+      const ratio = image.naturalWidth / image.naturalHeight;
+      setArtworkWarning(Math.abs(ratio - 0.8) > 0.04 ? "This artwork is not 4:5. It will be cropped in the public preview." : "");
+    };
+    image.onerror = () => {
+      if (active) setArtworkWarning("Unable to inspect artwork dimensions.");
+    };
+    image.src = localArtworkUrl;
+
+    return () => {
+      active = false;
+    };
+  }, [localArtworkUrl]);
 
   const setField = (key: keyof FormState, value: string) => {
     setForm(current => ({ ...current, [key]: value }));
@@ -208,6 +270,13 @@ export default function AdminPage() {
     merchImage: event?.merch_image_path ? "Merch image uploaded" : "",
   }), [event]);
 
+  const mediaPreviews = useMemo(() => ({
+    artwork: localArtworkUrl || getPublicImageUrl("artwork", event?.artwork_path),
+    artistImage: localArtistImageUrl || getPublicImageUrl("artist-images", event?.artist_image_path),
+    merchImage: localMerchImageUrl || getPublicImageUrl("merch-images", event?.merch_image_path),
+    audio: localAudioUrl || audioPreviewUrl,
+  }), [audioPreviewUrl, event?.artist_image_path, event?.artwork_path, event?.merch_image_path, localArtistImageUrl, localArtworkUrl, localAudioUrl, localMerchImageUrl]);
+
   if (loading) {
     return <main style={pageStyle}>Loading admin...</main>;
   }
@@ -252,10 +321,57 @@ export default function AdminPage() {
             </Grid>
           </Panel>
 
-          <FilePicker label="Song File" hint="MP3, WAV, OGG, FLAC, M4A. Audio remains private and uses signed URLs." accept="audio/*" disabled={disabled} currentLabel={fileLabels.audio} pendingFile={pendingFiles.audio} onFile={file => setPendingFiles(current => ({ ...current, audio: file }))} />
-          <FilePicker label="Artwork" hint="JPG, PNG, GIF, WEBP. Shown on the upcoming page." accept="image/*" disabled={disabled} currentLabel={fileLabels.artwork} pendingFile={pendingFiles.artwork} onFile={file => setPendingFiles(current => ({ ...current, artwork: file }))} />
-          <FilePicker label="Artist Image" hint="JPG, PNG, GIF, WEBP. Used on the teaser page." accept="image/*" disabled={disabled} currentLabel={fileLabels.artistImage} pendingFile={pendingFiles.artistImage} onFile={file => setPendingFiles(current => ({ ...current, artistImage: file }))} />
-          <FilePicker label="Merch Image" hint="JPG, PNG, GIF, WEBP. Used after the event finishes." accept="image/*" disabled={disabled} currentLabel={fileLabels.merchImage} pendingFile={pendingFiles.merchImage} onFile={file => setPendingFiles(current => ({ ...current, merchImage: file }))} />
+          <FilePicker
+            label="Song File"
+            hint="MP3, WAV, OGG, FLAC, M4A. Audio remains private and uses signed URLs."
+            accept="audio/*"
+            disabled={disabled}
+            currentLabel={fileLabels.audio}
+            pendingFile={pendingFiles.audio}
+            previewType="audio"
+            previewUrl={mediaPreviews.audio}
+            previewLoading={audioPreviewLoading}
+            previewError={audioPreviewError}
+            onFile={file => setPendingFiles(current => ({ ...current, audio: file }))}
+          />
+          <FilePicker
+            label="Artwork"
+            hint="Recommended artwork: vertical 4:5 image. Recommended: 1080 × 1350 px. JPG, PNG, GIF, WEBP."
+            accept="image/*"
+            disabled={disabled}
+            currentLabel={fileLabels.artwork}
+            pendingFile={pendingFiles.artwork}
+            previewType="image"
+            previewUrl={mediaPreviews.artwork}
+            previewAlt="Artwork preview"
+            previewAspectRatio="4 / 5"
+            warning={artworkWarning}
+            onFile={file => setPendingFiles(current => ({ ...current, artwork: file }))}
+          />
+          <FilePicker
+            label="Artist Image"
+            hint="JPG, PNG, GIF, WEBP. Used on the teaser page."
+            accept="image/*"
+            disabled={disabled}
+            currentLabel={fileLabels.artistImage}
+            pendingFile={pendingFiles.artistImage}
+            previewType="image"
+            previewUrl={mediaPreviews.artistImage}
+            previewAlt="Artist image preview"
+            onFile={file => setPendingFiles(current => ({ ...current, artistImage: file }))}
+          />
+          <FilePicker
+            label="Merch Image"
+            hint="JPG, PNG, GIF, WEBP. Used after the event finishes."
+            accept="image/*"
+            disabled={disabled}
+            currentLabel={fileLabels.merchImage}
+            pendingFile={pendingFiles.merchImage}
+            previewType="image"
+            previewUrl={mediaPreviews.merchImage}
+            previewAlt="Merch image preview"
+            onFile={file => setPendingFiles(current => ({ ...current, merchImage: file }))}
+          />
 
           <Panel title="Support Links">
             <Grid>
@@ -292,6 +408,24 @@ function fromEvent(event: MusicEvent): FormState {
     merch_url: event.merch_url ?? "",
     event_url: event.event_url ?? "",
   };
+}
+
+function useObjectUrl(file: File | null) {
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    if (!file) {
+      setUrl("");
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+
+  return url;
 }
 
 function ChatModerationPanel({
@@ -360,7 +494,9 @@ function ChatModerationPanel({
         {error && <p style={{ ...noteStyle, color: "#b91c1c" }}>{error}</p>}
       </Panel>
 
-      <ChatSection title="Pending Messages" empty="No pending messages." messages={chat.grouped.pending}>
+      <ChatPreview messages={chat.grouped.approved} busy={busy} run={run} />
+
+      <ChatSection title="Pending moderation queue" empty="No pending messages." messages={chat.grouped.pending}>
         {messageItem => (
           <>
             <SmallButton disabled={busy} onClick={() => run("Message approved.", () => setMessageStatus(messageItem.id, "approved").then(() => undefined))}>Approve</SmallButton>
@@ -370,26 +506,53 @@ function ChatModerationPanel({
         )}
       </ChatSection>
 
-      <ChatSection title="Approved Messages" empty="No approved messages." messages={chat.grouped.approved}>
+      <ChatSection title="Rejected queue" empty="No rejected messages." messages={chat.grouped.rejected}>
         {messageItem => (
           <>
-            <SmallButton disabled={busy} onClick={() => run(messageItem.is_pinned ? "Message unpinned." : "Message pinned.", () => updateMessageFlags(messageItem.id, { is_pinned: !messageItem.is_pinned }).then(() => undefined))}>{messageItem.is_pinned ? "Unpin" : "Pin"}</SmallButton>
-            <SmallButton disabled={busy} onClick={() => run(messageItem.is_highlighted ? "Highlight removed." : "Message highlighted.", () => updateMessageFlags(messageItem.id, { is_highlighted: !messageItem.is_highlighted }).then(() => undefined))}>{messageItem.is_highlighted ? "Remove Highlight" : "Highlight"}</SmallButton>
-            <SmallButton disabled={busy} onClick={() => run(messageItem.is_liked ? "Like removed." : "Message liked.", () => updateMessageFlags(messageItem.id, { is_liked: !messageItem.is_liked }).then(() => undefined))}>{messageItem.is_liked ? "Unlike" : "Like"}</SmallButton>
-            <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(messageItem.id))}>Delete</SmallButton>
-          </>
-        )}
-      </ChatSection>
-
-      <ChatSection title="Rejected Messages" empty="No rejected messages." messages={chat.grouped.rejected}>
-        {messageItem => (
-          <>
-            <SmallButton disabled={busy} onClick={() => run("Message approved.", () => setMessageStatus(messageItem.id, "approved").then(() => undefined))}>Approve</SmallButton>
+            <SmallButton disabled={busy} onClick={() => run("Message restored.", () => setMessageStatus(messageItem.id, "approved").then(() => undefined))}>Restore</SmallButton>
             <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(messageItem.id))}>Delete</SmallButton>
           </>
         )}
       </ChatSection>
     </div>
+  );
+}
+
+function ChatPreview({ messages, busy, run }: { messages: ChatMessage[]; busy: boolean; run: (label: string, action: () => Promise<void>) => Promise<void> }) {
+  const sorted = useMemo(() => [...messages].sort((a, b) => {
+    if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  }), [messages]);
+
+  return (
+    <Panel title={`LIVE CHAT PREVIEW (${sorted.length})`}>
+      <div style={{ border: "1px solid #111827", background: "#050505", color: "#f9fafb", borderRadius: 6, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        {sorted.length === 0 && <p style={{ fontSize: 13, color: "#9ca3af" }}>No approved messages yet.</p>}
+        {sorted.map(message => (
+          <div key={message.id} style={{
+            border: message.is_highlighted ? "1px solid #00ff41" : "1px solid rgba(255,255,255,0.12)",
+            background: message.is_highlighted ? "rgba(0,255,65,0.12)" : "rgba(255,255,255,0.04)",
+            borderRadius: 6,
+            padding: "10px 12px",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
+              <strong style={{ fontSize: 12, color: "#fff" }}>{message.display_name}</strong>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{formatChatTime(message.created_at)}</span>
+              {message.is_admin && <span style={darkBadgeStyle}>Admin</span>}
+              {message.is_pinned && <span style={darkBadgeStyle}>Pinned</span>}
+              {message.is_liked && <span style={darkBadgeStyle}>Liked</span>}
+            </div>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.82)", overflowWrap: "anywhere" }}>{message.body}</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              <SmallButton disabled={busy} onClick={() => run(message.is_pinned ? "Message unpinned." : "Message pinned.", () => updateMessageFlags(message.id, { is_pinned: !message.is_pinned }).then(() => undefined))}>{message.is_pinned ? "Unpin" : "Pin"}</SmallButton>
+              <SmallButton disabled={busy} onClick={() => run(message.is_highlighted ? "Highlight removed." : "Message highlighted.", () => updateMessageFlags(message.id, { is_highlighted: !message.is_highlighted }).then(() => undefined))}>{message.is_highlighted ? "Remove Highlight" : "Highlight"}</SmallButton>
+              <SmallButton disabled={busy} onClick={() => run(message.is_liked ? "Like removed." : "Message liked.", () => updateMessageFlags(message.id, { is_liked: !message.is_liked }).then(() => undefined))}>{message.is_liked ? "Unlike" : "Like"}</SmallButton>
+              <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(message.id))}>Delete</SmallButton>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }
 
@@ -423,6 +586,13 @@ function SmallButton({ children, onClick, disabled, color = "#6366f1" }: { child
       {children}
     </button>
   );
+}
+
+function formatChatTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
@@ -485,6 +655,17 @@ const badgeStyle: React.CSSProperties = {
   textTransform: "uppercase",
   background: "#eef2ff",
   color: "#4338ca",
+  borderRadius: 999,
+  padding: "1px 6px",
+};
+
+const darkBadgeStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  background: "rgba(0,255,65,0.14)",
+  color: "#00ff41",
+  border: "1px solid rgba(0,255,65,0.42)",
   borderRadius: 999,
   padding: "1px 6px",
 };

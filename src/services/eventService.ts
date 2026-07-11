@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { addHoursUtc } from "@/lib/eventTiming";
 import type { CreateEventInput, MusicEvent, UpdateEventInput } from "@/types/event";
 
 const PUBLIC_STATUSES = ["upcoming", "live", "finished"];
@@ -9,8 +10,8 @@ function toUsefulError(error: unknown, fallback: string) {
 }
 
 function calculateEndsAt(startsAt: string | null | undefined, durationHours: number | null | undefined) {
-  if (!startsAt || !durationHours || durationHours <= 0) return null;
-  return new Date(new Date(startsAt).getTime() + durationHours * 60 * 60 * 1000).toISOString();
+  if (!startsAt) return null;
+  return addHoursUtc(startsAt, durationHours);
 }
 
 function validateStartable(event: Partial<MusicEvent>) {
@@ -87,7 +88,7 @@ export async function startEvent(id: string, latest?: UpdateEventInput) {
 
   const now = new Date().toISOString();
   const candidate = { ...existing, ...latest, starts_at: now };
-  const endsAt = latest?.ends_at ?? calculateEndsAt(now, candidate.duration_hours) ?? existing.ends_at;
+  const endsAt = calculateEndsAt(now, candidate.duration_hours);
   validateStartable({ ...candidate, ends_at: endsAt });
 
   return updateEvent(id, { ...latest, status: "live", starts_at: now, ends_at: endsAt });

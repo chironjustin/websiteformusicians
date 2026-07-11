@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getEventDisplayState, getLiveCountdownTarget, getRemainingMilliseconds, getUpcomingCountdownTarget } from "@/lib/eventTiming";
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
 import { sendVisitorMessage } from "@/services/chatService";
@@ -28,14 +29,6 @@ function splitMs(ms: number) {
 
 function fmtSecs(seconds: number) {
   return `${pad2(Math.floor(seconds / 60))}:${pad2(seconds % 60)}`;
-}
-
-function displayState(event: MusicEvent, now: Date): DisplayState {
-  const starts = event.starts_at ? new Date(event.starts_at).getTime() : null;
-  const ends = event.ends_at ? new Date(event.ends_at).getTime() : null;
-  if (event.status === "finished" || (ends && now.getTime() >= ends)) return "finished";
-  if (event.status === "live" || (starts && now.getTime() >= starts)) return "live";
-  return "upcoming";
 }
 
 function GlobalStyles() {
@@ -148,9 +141,9 @@ function Artwork({ size = 360, imageUrl = "" }: { size?: number; imageUrl?: stri
   return (
     <div style={{
       width: size,
-      height: size,
-      maxWidth: "min(82vw, 82vmin)",
-      maxHeight: "min(82vw, 82vmin)",
+      aspectRatio: "4 / 5",
+      maxWidth: "min(76vw, 42vh)",
+      maxHeight: "min(88vw, 70vh)",
       border: `2px solid ${GREEN}`,
       position: "relative",
       flexShrink: 0,
@@ -166,18 +159,11 @@ function Artwork({ size = 360, imageUrl = "" }: { size?: number; imageUrl?: stri
 }
 
 function Countdown({ target, mode = "countdown" }: { target: string | null; mode?: "countdown" | "remaining" }) {
-  const [remaining, setRemaining] = useState(() => {
-    if (!target) return 0;
-    return Math.max(0, new Date(target).getTime() - Date.now());
-  });
+  const [remaining, setRemaining] = useState(() => getRemainingMilliseconds(target));
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (!target) {
-        setRemaining(0);
-        return;
-      }
-      setRemaining(Math.max(0, new Date(target).getTime() - Date.now()));
+      setRemaining(getRemainingMilliseconds(target));
     }, 50);
     return () => window.clearInterval(id);
   }, [target]);
@@ -311,11 +297,6 @@ function StatusPanel({ state, chatOpen, onToggleChat }: { state: DisplayState; c
       }}>
         {chatOpen ? "› " : "  "}chat
       </button>
-      <div style={{ borderTop: "1px solid rgba(0,255,65,0.2)", marginTop: 4, paddingTop: 4 }}>
-        <a href="/admin" style={{ fontFamily: VT, fontSize: "0.85rem", color: "rgba(0,255,65,0.5)", textDecoration: "none", letterSpacing: "0.08em" }}>
-          → admin
-        </a>
-      </div>
     </nav>
   );
 }
@@ -338,6 +319,7 @@ export default function PublicEventPage() {
   const [now, setNow] = useState(new Date());
   const [chatOpen, setChatOpen] = useState(false);
   const chat = useEventChat(event?.id, "public");
+  const state = event ? getEventDisplayState(event, now) : "upcoming";
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -349,18 +331,31 @@ export default function PublicEventPage() {
     setAudioError("");
     setAudioUrl("");
 
+    if (state !== "live") {
+      return () => {
+        active = false;
+      };
+    }
+
+    if (!event?.audio_path) {
+      setAudioError("live audio unavailable");
+      return () => {
+        active = false;
+      };
+    }
+
     getSignedAudioUrl(event?.audio_path)
       .then(url => {
         if (active) setAudioUrl(url);
       })
       .catch(() => {
-        if (active) setAudioError("audio unavailable");
+        if (active) setAudioError("live audio unavailable");
       });
 
     return () => {
       active = false;
     };
-  }, [event?.audio_path]);
+  }, [event?.audio_path, state]);
 
   const images = useMemo(() => ({
     artwork: getPublicImageUrl("artwork", event?.artwork_path),
@@ -380,16 +375,14 @@ export default function PublicEventPage() {
     return <LoadingShell>no active event yet.</LoadingShell>;
   }
 
-  const state = displayState(event, now);
   const title = event.title.toLowerCase();
-  const liveTarget = event.ends_at || (event.duration_hours && event.starts_at
-    ? new Date(new Date(event.starts_at).getTime() + event.duration_hours * 60 * 60 * 1000).toISOString()
-    : null);
+  const upcomingTarget = getUpcomingCountdownTarget(event);
+  const liveTarget = getLiveCountdownTarget(event);
 
   return (
     <Shell state={state} chatOpen={chatOpen} onToggleChat={() => setChatOpen(open => !open)}>
       {state !== "finished" && <DVDBounce imageUrl={images.artist} />}
-      {state === "upcoming" && <UpcomingPage title={title} artworkUrl={images.artwork} startsAt={event.starts_at} />}
+      {state === "upcoming" && <UpcomingPage title={title} artworkUrl={images.artwork} startsAt={upcomingTarget} />}
       {state === "live" && <LivePage title={title} artworkUrl={images.artwork} audioUrl={audioUrl} audioError={audioError} liveTarget={liveTarget} />}
       {state === "finished" && <FinishedPage event={event} title={title} merchImage={images.merch} />}
       <ChatDrawer
