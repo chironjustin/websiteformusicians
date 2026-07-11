@@ -59,6 +59,7 @@ export default function AdminPage() {
   const [audioPreviewUrl, setAudioPreviewUrl] = useState("");
   const [audioPreviewLoading, setAudioPreviewLoading] = useState(false);
   const [audioPreviewError, setAudioPreviewError] = useState("");
+  const [audioPreviewAttempt, setAudioPreviewAttempt] = useState(0);
   const [artistImageWarning, setArtistImageWarning] = useState("");
   const [activeTab, setActiveTab] = useState<AdminTab>("event");
   const chat = useEventChat(event?.id, "admin");
@@ -96,12 +97,14 @@ export default function AdminPage() {
     if (!event?.audio_path) return;
 
     setAudioPreviewLoading(true);
-    getSignedAudioUrl(event.audio_path)
+    getSignedAudioUrl(event.audio_path, 3600)
       .then(url => {
         if (active) setAudioPreviewUrl(url);
       })
-      .catch(() => {
-        if (active) setAudioPreviewError("Unable to load private audio preview.");
+      .catch(err => {
+        const message = err instanceof Error ? err.message : "Unable to load private audio preview.";
+        console.error("Unable to create signed audio preview URL:", err);
+        if (active) setAudioPreviewError(message);
       })
       .finally(() => {
         if (active) setAudioPreviewLoading(false);
@@ -110,7 +113,7 @@ export default function AdminPage() {
     return () => {
       active = false;
     };
-  }, [event?.audio_path, localAudioUrl]);
+  }, [event?.audio_path, localAudioUrl, audioPreviewAttempt]);
 
   useEffect(() => {
     if (!localArtistImageUrl) {
@@ -332,6 +335,7 @@ export default function AdminPage() {
             previewUrl={mediaPreviews.audio}
             previewLoading={audioPreviewLoading}
             previewError={audioPreviewError}
+            onPreviewRetry={() => setAudioPreviewAttempt(attempt => attempt + 1)}
             onFile={file => setPendingFiles(current => ({ ...current, audio: file }))}
           />
           <FilePicker

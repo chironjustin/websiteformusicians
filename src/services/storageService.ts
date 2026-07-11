@@ -18,6 +18,19 @@ function sanitizeFilename(name: string) {
   return cleaned || "upload";
 }
 
+function normalizeObjectPath(bucket: Bucket, path: string | null | undefined) {
+  if (!path) return "";
+  const trimmed = path.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed) || trimmed.includes("/storage/v1/object/")) {
+    throw new Error("Stored file path must be a storage object path, not a URL.");
+  }
+  if (trimmed.startsWith(`${bucket}/`)) {
+    throw new Error(`Stored file path should not include the ${bucket} bucket prefix.`);
+  }
+  return trimmed.replace(/^\/+/, "");
+}
+
 function validateFile(file: File, kind: "image" | "audio") {
   const allowed = kind === "image" ? IMAGE_TYPES : AUDIO_TYPES;
   const maxSize = kind === "image" ? MAX_IMAGE_BYTES : MAX_AUDIO_BYTES;
@@ -61,13 +74,15 @@ export async function removeFile(bucket: Bucket, path: string) {
 }
 
 export function getPublicImageUrl(bucket: Exclude<Bucket, "audio">, path: string | null | undefined) {
-  if (!path) return "";
-  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+  const objectPath = normalizeObjectPath(bucket, path);
+  if (!objectPath) return "";
+  return supabase.storage.from(bucket).getPublicUrl(objectPath).data.publicUrl;
 }
 
-export async function getSignedAudioUrl(path: string | null | undefined, expiresIn = 60 * 30) {
-  if (!path) return "";
-  const { data, error } = await supabase.storage.from("audio").createSignedUrl(path, expiresIn);
+export async function getSignedAudioUrl(path: string | null | undefined, expiresIn = 3600) {
+  const objectPath = normalizeObjectPath("audio", path);
+  if (!objectPath) return "";
+  const { data, error } = await supabase.storage.from("audio").createSignedUrl(objectPath, expiresIn);
   if (error) throw new Error(error.message);
   return data.signedUrl;
 }

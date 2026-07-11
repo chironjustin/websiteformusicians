@@ -10,6 +10,7 @@ interface FilePickerProps {
   previewAspectRatio?: string;
   previewLoading?: boolean;
   previewError?: string;
+  onPreviewRetry?: () => void;
   warning?: string;
   disabled?: boolean;
   onFile: (file: File | null) => void;
@@ -27,6 +28,7 @@ export default function FilePicker({
   previewAspectRatio = "1 / 1",
   previewLoading,
   previewError,
+  onPreviewRetry,
   warning,
   disabled,
   onFile,
@@ -63,6 +65,20 @@ export default function FilePicker({
             <p style={{ fontSize: 12, color: previewError ? "#b91c1c" : "#9ca3af" }}>
               {previewError || "No audio preview yet."}
             </p>
+          )}
+          {previewError && onPreviewRetry && (
+            <button type="button" disabled={disabled || previewLoading} onClick={onPreviewRetry} style={{
+              marginTop: 6,
+              padding: "4px 9px",
+              border: "1px solid #d1d5db",
+              borderRadius: 4,
+              background: "#fff",
+              color: "#374151",
+              fontSize: 12,
+              fontWeight: 600,
+            }}>
+              Retry preview
+            </button>
           )}
         </div>
       )}

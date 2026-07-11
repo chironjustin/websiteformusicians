@@ -12,6 +12,7 @@
 - [ ] Create Storage bucket `merch-images` as public.
 - [ ] Create Storage bucket `audio` as private.
 - [ ] Run `supabase/storage-policies.sql` after creating buckets.
+- [ ] Confirm authenticated users can SELECT their own scoped storage files so private audio signed URLs can be created.
 - [ ] Optionally enable Realtime for `public.events`.
 - [ ] Optionally enable Realtime for `public.chat_messages`.
 - [ ] Copy the project URL into `VITE_SUPABASE_URL`.

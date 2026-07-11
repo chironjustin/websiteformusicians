@@ -34,6 +34,18 @@ with check (
   and auth.uid()::text = (storage.foldername(name))[1]
 );
 
+drop policy if exists "Users can read their own scoped files"
+on storage.objects;
+
+create policy "Users can read their own scoped files"
+on storage.objects
+for select
+to authenticated
+using (
+  bucket_id in ('artist-images', 'artwork', 'merch-images', 'audio')
+  and auth.uid()::text = (storage.foldername(name))[1]
+);
+
 create policy "Users can update their own scoped files"
 on storage.objects
 for update
@@ -57,4 +69,5 @@ using (
 );
 
 -- Do not add a public read policy for the audio bucket.
--- The app uses signed URLs for unreleased audio playback.
+-- The app uses signed URLs for unreleased audio playback. Authenticated owners
+-- still need SELECT access to their own audio objects to create signed URLs.

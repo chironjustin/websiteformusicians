@@ -53,6 +53,8 @@ Vite outputs to `dist`.
 8. Optionally enable Realtime for `public.events` and `public.chat_messages`.
 9. Add the same `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` values locally and in Vercel.
 
+The private `audio` bucket is not publicly readable. Authenticated event owners still need SELECT access to their own `user-id/event-id/file` objects so Supabase can create signed admin preview and playback URLs.
+
 Event timestamps are stored as UTC `timestamptz` values. The admin editor converts them to local browser time for `datetime-local` inputs and converts local input back to UTC when saving.
 
 ## Moderated Chat
