@@ -59,7 +59,7 @@ export default function AdminPage() {
   const [audioPreviewUrl, setAudioPreviewUrl] = useState("");
   const [audioPreviewLoading, setAudioPreviewLoading] = useState(false);
   const [audioPreviewError, setAudioPreviewError] = useState("");
-  const [artworkWarning, setArtworkWarning] = useState("");
+  const [artistImageWarning, setArtistImageWarning] = useState("");
   const [activeTab, setActiveTab] = useState<AdminTab>("event");
   const chat = useEventChat(event?.id, "admin");
   const localArtistImageUrl = useObjectUrl(pendingFiles.artistImage);
@@ -113,8 +113,8 @@ export default function AdminPage() {
   }, [event?.audio_path, localAudioUrl]);
 
   useEffect(() => {
-    if (!localArtworkUrl) {
-      setArtworkWarning("");
+    if (!localArtistImageUrl) {
+      setArtistImageWarning("");
       return;
     }
 
@@ -123,17 +123,17 @@ export default function AdminPage() {
     image.onload = () => {
       if (!active || image.naturalHeight === 0) return;
       const ratio = image.naturalWidth / image.naturalHeight;
-      setArtworkWarning(Math.abs(ratio - 0.8) > 0.04 ? "This artwork is not 4:5. It will be cropped in the public preview." : "");
+      setArtistImageWarning(Math.abs(ratio - 0.8) > 0.04 ? "This artist image is not 4:5. It will be cropped in the bouncing public preview." : "");
     };
     image.onerror = () => {
-      if (active) setArtworkWarning("Unable to inspect artwork dimensions.");
+      if (active) setArtistImageWarning("Unable to inspect artist image dimensions.");
     };
-    image.src = localArtworkUrl;
+    image.src = localArtistImageUrl;
 
     return () => {
       active = false;
     };
-  }, [localArtworkUrl]);
+  }, [localArtistImageUrl]);
 
   const setField = (key: keyof FormState, value: string) => {
     setForm(current => ({ ...current, [key]: value }));
@@ -336,7 +336,7 @@ export default function AdminPage() {
           />
           <FilePicker
             label="Artwork"
-            hint="Recommended artwork: vertical 4:5 image. Recommended: 1080 × 1350 px. JPG, PNG, GIF, WEBP."
+            hint="JPG, PNG, GIF, WEBP. Shown on the upcoming page."
             accept="image/*"
             disabled={disabled}
             currentLabel={fileLabels.artwork}
@@ -344,13 +344,11 @@ export default function AdminPage() {
             previewType="image"
             previewUrl={mediaPreviews.artwork}
             previewAlt="Artwork preview"
-            previewAspectRatio="4 / 5"
-            warning={artworkWarning}
             onFile={file => setPendingFiles(current => ({ ...current, artwork: file }))}
           />
           <FilePicker
             label="Artist Image"
-            hint="JPG, PNG, GIF, WEBP. Used on the teaser page."
+            hint="Recommended: 4:5 vertical, 1080 × 1350 px. JPG, PNG, GIF, WEBP. Used on the teaser page."
             accept="image/*"
             disabled={disabled}
             currentLabel={fileLabels.artistImage}
@@ -358,6 +356,8 @@ export default function AdminPage() {
             previewType="image"
             previewUrl={mediaPreviews.artistImage}
             previewAlt="Artist image preview"
+            previewAspectRatio="4 / 5"
+            warning={artistImageWarning}
             onFile={file => setPendingFiles(current => ({ ...current, artistImage: file }))}
           />
           <FilePicker

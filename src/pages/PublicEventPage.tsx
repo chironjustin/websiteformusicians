@@ -86,6 +86,7 @@ const PLACEHOLDER_SRC = "data:image/svg+xml," + encodeURIComponent(`
 
 function DVDBounce({ imageUrl }: { imageUrl: string }) {
   const size = 96;
+  const height = size * 1.25;
   const [pos, setPos] = useState({ x: 180, y: 130 });
   const velocity = useRef({ x: 2.2, y: 1.75 });
 
@@ -103,9 +104,9 @@ function DVDBounce({ imageUrl }: { imageUrl: string }) {
           nextX = Math.max(0, Math.min(vw - size, nextX));
         }
 
-        if (nextY <= 0 || nextY >= vh - size) {
+        if (nextY <= 0 || nextY >= vh - height) {
           velocity.current.y *= -1;
-          nextY = Math.max(0, Math.min(vh - size, nextY));
+          nextY = Math.max(0, Math.min(vh - height, nextY));
         }
 
         return { x: nextX, y: nextY };
@@ -120,11 +121,11 @@ function DVDBounce({ imageUrl }: { imageUrl: string }) {
   const src = imageUrl.trim() || PLACEHOLDER_SRC;
 
   return (
-    <div style={{ position: "fixed", left: pos.x, top: pos.y, zIndex: 50, pointerEvents: "none", width: size, height: size }}>
+    <div style={{ position: "fixed", left: pos.x, top: pos.y, zIndex: 50, pointerEvents: "none", width: size, height }}>
       <img
         src={src}
         alt=""
-        style={{ width: size, height: size, objectFit: "cover", display: "block", imageRendering: "pixelated", opacity: 0.82 }}
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", imageRendering: "pixelated", opacity: 0.82 }}
       />
     </div>
   );
@@ -141,9 +142,9 @@ function Artwork({ size = 360, imageUrl = "" }: { size?: number; imageUrl?: stri
   return (
     <div style={{
       width: size,
-      aspectRatio: "4 / 5",
-      maxWidth: "min(76vw, 42vh)",
-      maxHeight: "min(88vw, 70vh)",
+      height: size,
+      maxWidth: "min(82vw, 82vmin)",
+      maxHeight: "min(82vw, 82vmin)",
       border: `2px solid ${GREEN}`,
       position: "relative",
       flexShrink: 0,
@@ -186,7 +187,7 @@ function Countdown({ target, mode = "countdown" }: { target: string | null; mode
   );
 }
 
-function AudioPlayer({ audioUrl, error }: { audioUrl: string; error: string }) {
+function AudioPlayer({ audioUrl }: { audioUrl: string }) {
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -246,7 +247,7 @@ function AudioPlayer({ audioUrl, error }: { audioUrl: string; error: string }) {
           {playing ? "■" : "▶"}
         </button>
         <span style={{ fontFamily: VT, fontSize: "1.3rem", color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em" }}>
-          {audioUrl ? fmtSecs(Math.floor(progress)) : error || "audio loading..."}
+          {fmtSecs(Math.floor(progress))}
         </span>
       </div>
       <div onClick={seek} style={{ width: "100%", height: "2px", background: "rgba(0,255,65,0.18)", position: "relative" }}>
@@ -315,7 +316,6 @@ function Shell({ children, state, chatOpen, onToggleChat }: { children: React.Re
 export default function PublicEventPage() {
   const { event, loading, error } = useCurrentEvent();
   const [audioUrl, setAudioUrl] = useState("");
-  const [audioError, setAudioError] = useState("");
   const [now, setNow] = useState(new Date());
   const [chatOpen, setChatOpen] = useState(false);
   const chat = useEventChat(event?.id, "public");
@@ -328,7 +328,6 @@ export default function PublicEventPage() {
 
   useEffect(() => {
     let active = true;
-    setAudioError("");
     setAudioUrl("");
 
     if (state !== "live") {
@@ -338,7 +337,6 @@ export default function PublicEventPage() {
     }
 
     if (!event?.audio_path) {
-      setAudioError("live audio unavailable");
       return () => {
         active = false;
       };
@@ -348,9 +346,7 @@ export default function PublicEventPage() {
       .then(url => {
         if (active) setAudioUrl(url);
       })
-      .catch(() => {
-        if (active) setAudioError("live audio unavailable");
-      });
+      .catch(() => {});
 
     return () => {
       active = false;
@@ -383,7 +379,7 @@ export default function PublicEventPage() {
     <Shell state={state} chatOpen={chatOpen} onToggleChat={() => setChatOpen(open => !open)}>
       {state !== "finished" && <DVDBounce imageUrl={images.artist} />}
       {state === "upcoming" && <UpcomingPage title={title} artworkUrl={images.artwork} startsAt={upcomingTarget} />}
-      {state === "live" && <LivePage title={title} artworkUrl={images.artwork} audioUrl={audioUrl} audioError={audioError} liveTarget={liveTarget} />}
+      {state === "live" && <LivePage title={title} artworkUrl={images.artwork} audioUrl={audioUrl} liveTarget={liveTarget} />}
       {state === "finished" && <FinishedPage event={event} title={title} merchImage={images.merch} />}
       <ChatDrawer
         eventId={event.id}
@@ -422,7 +418,7 @@ function UpcomingPage({ title, artworkUrl, startsAt }: { title: string; artworkU
   );
 }
 
-function LivePage({ title, artworkUrl, audioUrl, audioError, liveTarget }: { title: string; artworkUrl: string; audioUrl: string; audioError: string; liveTarget: string | null }) {
+function LivePage({ title, artworkUrl, audioUrl, liveTarget }: { title: string; artworkUrl: string; audioUrl: string; liveTarget: string | null }) {
   return (
     <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: "clamp(1.25rem, 4vh, 2.5rem)", padding: "2rem", width: "min(640px, 92vw)" }}>
@@ -431,9 +427,11 @@ function LivePage({ title, artworkUrl, audioUrl, audioError, liveTarget }: { tit
           {title}
         </p>
         <Artwork size={320} imageUrl={artworkUrl} />
-        <div style={{ width: "100%", maxWidth: 480 }}>
-          <AudioPlayer audioUrl={audioUrl} error={audioError} />
-        </div>
+        {audioUrl && (
+          <div style={{ width: "100%", maxWidth: 480 }}>
+            <AudioPlayer audioUrl={audioUrl} />
+          </div>
+        )}
       </div>
     </div>
   );
