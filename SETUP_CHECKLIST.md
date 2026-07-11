@@ -6,12 +6,14 @@
 - [ ] Enable email/password authentication.
 - [ ] Create the first admin user in Supabase Auth.
 - [ ] Run `supabase/schema.sql` in the SQL editor.
+- [ ] Run `supabase/chat-schema.sql` in the SQL editor.
 - [ ] Create Storage bucket `artist-images` as public.
 - [ ] Create Storage bucket `artwork` as public.
 - [ ] Create Storage bucket `merch-images` as public.
 - [ ] Create Storage bucket `audio` as private.
 - [ ] Run `supabase/storage-policies.sql` after creating buckets.
 - [ ] Optionally enable Realtime for `public.events`.
+- [ ] Optionally enable Realtime for `public.chat_messages`.
 - [ ] Copy the project URL into `VITE_SUPABASE_URL`.
 - [ ] Copy the anon public key into `VITE_SUPABASE_ANON_KEY`.
 - [ ] Do not use or expose the service-role key in this frontend app.
@@ -27,8 +29,13 @@
 - [ ] Create and save a draft at `/admin`.
 - [ ] Upload artwork or artist image.
 - [ ] Upload audio.
+- [ ] Select a local start time and confirm it still displays the same local time after save/refresh.
 - [ ] Schedule or start the event.
 - [ ] Confirm `/` updates without a redeploy.
+- [ ] Submit a visitor chat message on `/` during a live event.
+- [ ] Confirm the message appears as pending in `/admin`.
+- [ ] Approve the message and confirm it appears publicly.
+- [ ] Test pin, highlight, like, reject, and delete moderation actions.
 
 ## Vercel
 

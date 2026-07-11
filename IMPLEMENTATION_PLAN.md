@@ -37,6 +37,14 @@
 13. Run `npm install` and `npm run build`; fix Vite/build errors.
 14. Make small logical commits after major phases.
 
+## Follow-up improvements applied
+
+- Fixed the admin start-time timezone bug by formatting `datetime-local` values from local browser date parts instead of slicing UTC ISO strings.
+- Kept Supabase event timestamps stored as UTC and converted local admin input back to UTC on save.
+- Added `supabase/chat-schema.sql` for moderated chat messages with RLS.
+- Added realtime chat hooks and services for public approved chat history and owner-only moderation.
+- Added admin Chat tab moderation actions and public live/finished chat views.
+
 ## Automatic timing TODO
 
 The client can safely display an upcoming event as live once `starts_at` is reached, but it must not be trusted to persist scheduled status transitions. Fully reliable automatic database status changes require a trusted scheduler, such as:
