@@ -3,7 +3,7 @@ import { Radio } from "lucide-react";
 import { dateTimeLocalToUtc, formatDateTimeLocal } from "@/lib/datetime";
 import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
-import { deleteChatMessage, sendAdminMessage, setMessageStatus, updateMessageFlags } from "@/services/chatService";
+import { deleteChatMessage, getAdminChatMessages, sendAdminMessage, setMessageStatus, updateMessageFlags } from "@/services/chatService";
 import { createEvent, endEvent, getAdminEvents, startEvent, updateEvent } from "@/services/eventService";
 import { getPublicImageUrl, getSignedAudioUrl, uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage } from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
@@ -11,7 +11,7 @@ import type { MusicEvent, UpdateEventInput } from "@/types/event";
 import FilePicker from "@/components/admin/FilePicker";
 import EventStatusBadge from "@/components/public/EventStatusBadge";
 
-type AdminTab = "event" | "chat";
+type AdminTab = "event" | "chat" | "archive";
 
 type FormState = {
   title: string;
@@ -28,6 +28,16 @@ type PendingFiles = {
   artwork: File | null;
   merchImage: File | null;
   audio: File | null;
+};
+
+type ChatCounts = {
+  total: number;
+  approved: number;
+  pending: number;
+  rejected: number;
+  pinned: number;
+  highlighted: number;
+  admin: number;
 };
 
 const emptyForm: FormState = {
@@ -49,6 +59,7 @@ const emptyFiles: PendingFiles = {
 
 export default function AdminPage() {
   const [event, setEvent] = useState<MusicEvent | null>(null);
+  const [events, setEvents] = useState<MusicEvent[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [pendingFiles, setPendingFiles] = useState<PendingFiles>(emptyFiles);
   const [loading, setLoading] = useState(true);
@@ -62,7 +73,9 @@ export default function AdminPage() {
   const [audioPreviewAttempt, setAudioPreviewAttempt] = useState(0);
   const [artistImageWarning, setArtistImageWarning] = useState("");
   const [activeTab, setActiveTab] = useState<AdminTab>("event");
-  const chat = useEventChat(event?.id, "admin");
+  const currentChatEvent = event && isActiveChatEvent(event) ? event : null;
+  const currentEventId = currentChatEvent?.id ?? null;
+  const chat = useEventChat(currentEventId, "admin");
   const localArtistImageUrl = useObjectUrl(pendingFiles.artistImage);
   const localArtworkUrl = useObjectUrl(pendingFiles.artwork);
   const localMerchImageUrl = useObjectUrl(pendingFiles.merchImage);
@@ -70,8 +83,9 @@ export default function AdminPage() {
 
   useEffect(() => {
     getAdminEvents()
-      .then(events => {
-        const current = events[0] ?? null;
+      .then(loadedEvents => {
+        setEvents(loadedEvents);
+        const current = loadedEvents.find(item => !isArchivedEvent(item)) ?? null;
         setEvent(current);
         if (current) setForm(fromEvent(current));
       })
@@ -81,6 +95,18 @@ export default function AdminPage() {
 
   const disabled = loading || busy;
   const hasRequiredMedia = Boolean(event?.audio_path || pendingFiles.audio) && Boolean(event?.artwork_path || event?.artist_image_path || pendingFiles.artwork || pendingFiles.artistImage);
+  const archivedEvents = useMemo(() => events.filter(isArchivedEvent).sort(compareArchivedEvents), [events]);
+
+  function syncSavedEvent(saved: MusicEvent) {
+    setEvents(current => upsertEvent(current, saved));
+    if (isArchivedEvent(saved)) {
+      setEvent(null);
+      setForm(emptyForm);
+      return;
+    }
+    setEvent(saved);
+    setForm(fromEvent(saved));
+  }
 
   useEffect(() => {
     if (localAudioUrl) {
@@ -145,7 +171,7 @@ export default function AdminPage() {
   async function ensureEvent() {
     if (event) return event;
     const created = await createEvent({ title: form.title.trim() || "Untitled Event" });
-    setEvent(created);
+    syncSavedEvent(created);
     return created;
   }
 
@@ -229,8 +255,7 @@ export default function AdminPage() {
       const uploadUpdates = await uploadPendingFiles(baseEvent);
       const latest = toUpdateInput(uploadUpdates);
       const saved = await action(baseEvent, latest);
-      setEvent(saved);
-      setForm(fromEvent(saved));
+      syncSavedEvent(saved);
       setMessage(label);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -264,8 +289,7 @@ export default function AdminPage() {
     setMessage("");
     try {
       const saved = await endEvent(event.id);
-      setEvent(saved);
-      setForm(fromEvent(saved));
+      syncSavedEvent(saved);
       setMessage("Event ended.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to end event.");
@@ -302,9 +326,11 @@ export default function AdminPage() {
       </header>
 
       <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", display: "flex", padding: "0 16px" }}>
-        {(["event", "chat"] as AdminTab[]).map(tab => (
+        {(["event", "chat", "archive"] as AdminTab[]).map(tab => (
           <button key={tab} type="button" onClick={() => setActiveTab(tab)} style={tabButtonStyle(activeTab === tab)}>
-            {tab === "event" ? "Event" : `Chat${chat.grouped.pending.length > 0 ? ` (${chat.grouped.pending.length})` : ""}`}
+            {tab === "event" && "Event"}
+            {tab === "chat" && `Chat${chat.grouped.pending.length > 0 ? ` (${chat.grouped.pending.length})` : ""}`}
+            {tab === "archive" && `Archived Events${archivedEvents.length > 0 ? ` (${archivedEvents.length})` : ""}`}
           </button>
         ))}
       </div>
@@ -392,10 +418,9 @@ export default function AdminPage() {
             </Grid>
           </Panel>
         </form>
-      ) : (
+      ) : activeTab === "chat" ? (
         <ChatModerationPanel
-          event={event}
-          ensureEvent={ensureEvent}
+          event={currentChatEvent}
           chat={chat}
           busy={busy}
           setBusy={setBusy}
@@ -404,6 +429,8 @@ export default function AdminPage() {
           error={error}
           message={message}
         />
+      ) : (
+        <ArchivedEventsPanel events={archivedEvents} />
       )}
     </main>
   );
@@ -431,6 +458,55 @@ function formatAdminDateTime(value: string) {
   }).format(date);
 }
 
+function isArchivedEvent(event: MusicEvent) {
+  if (event.status === "finished") return true;
+  if (!event.ends_at) return false;
+  const endsAt = new Date(event.ends_at).getTime();
+  return !Number.isNaN(endsAt) && endsAt <= Date.now();
+}
+
+function isActiveChatEvent(event: MusicEvent) {
+  return !isArchivedEvent(event) && event.status !== "draft";
+}
+
+function compareArchivedEvents(a: MusicEvent, b: MusicEvent) {
+  return archivedSortTime(b) - archivedSortTime(a);
+}
+
+function archivedSortTime(event: MusicEvent) {
+  const value = event.ends_at || event.starts_at || event.updated_at || event.created_at;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function upsertEvent(events: MusicEvent[], saved: MusicEvent) {
+  const exists = events.some(event => event.id === saved.id);
+  const nextEvents = exists
+    ? events.map(event => event.id === saved.id ? saved : event)
+    : [saved, ...events];
+  return [...nextEvents].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+}
+
+function countMessages(messages: ChatMessage[] = []): ChatCounts {
+  return messages.reduce<ChatCounts>((counts, message) => ({
+    total: counts.total + 1,
+    approved: counts.approved + (message.status === "approved" ? 1 : 0),
+    pending: counts.pending + (message.status === "pending" ? 1 : 0),
+    rejected: counts.rejected + (message.status === "rejected" ? 1 : 0),
+    pinned: counts.pinned + (message.is_pinned ? 1 : 0),
+    highlighted: counts.highlighted + (message.is_highlighted ? 1 : 0),
+    admin: counts.admin + (message.is_admin ? 1 : 0),
+  }), {
+    total: 0,
+    approved: 0,
+    pending: 0,
+    rejected: 0,
+    pinned: 0,
+    highlighted: 0,
+    admin: 0,
+  });
+}
+
 function useObjectUrl(file: File | null) {
   const [url, setUrl] = useState("");
 
@@ -449,9 +525,167 @@ function useObjectUrl(file: File | null) {
   return url;
 }
 
+function ArchivedEventsPanel({ events }: { events: MusicEvent[] }) {
+  const [selectedId, setSelectedId] = useState<string | null>(events[0]?.id ?? null);
+  const [messagesByEvent, setMessagesByEvent] = useState<Record<string, ChatMessage[]>>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const eventKey = useMemo(() => events.map(event => event.id).join("|"), [events]);
+
+  useEffect(() => {
+    if (!events.some(event => event.id === selectedId)) {
+      setSelectedId(events[0]?.id ?? null);
+    }
+  }, [events, selectedId]);
+
+  useEffect(() => {
+    if (events.length === 0) {
+      setMessagesByEvent({});
+      setError("");
+      return;
+    }
+
+    let active = true;
+    setLoading(true);
+    setError("");
+    Promise.all(events.map(async event => {
+      const messages = await getAdminChatMessages(event.id);
+      return [event.id, messages] as const;
+    }))
+      .then(entries => {
+        if (active) setMessagesByEvent(Object.fromEntries(entries));
+      })
+      .catch(err => {
+        if (active) setError(err instanceof Error ? err.message : "Unable to load archived messages.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [eventKey, events]);
+
+  const selectedEvent = events.find(event => event.id === selectedId) ?? null;
+  const selectedMessages = selectedEvent ? messagesByEvent[selectedEvent.id] ?? [] : [];
+  const selectedCounts = countMessages(selectedMessages);
+
+  return (
+    <div style={{ padding: 24, maxWidth: 980, display: "flex", flexDirection: "column", gap: 20 }}>
+      <Panel title="Archived Events">
+        {loading && <p style={noteStyle}>Loading archive...</p>}
+        {error && <p style={{ ...noteStyle, color: "#b91c1c" }}>{error}</p>}
+        {events.length === 0 && <p style={{ fontSize: 13, color: "#6b7280" }}>No finished events are archived yet.</p>}
+        {events.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+            {events.map(archiveEvent => {
+              const counts = countMessages(messagesByEvent[archiveEvent.id] ?? []);
+              const artworkUrl = getPublicImageUrl("artwork", archiveEvent.artwork_path);
+              return (
+                <button
+                  key={archiveEvent.id}
+                  type="button"
+                  onClick={() => setSelectedId(archiveEvent.id)}
+                  style={{
+                    ...archiveCardStyle,
+                    borderColor: selectedId === archiveEvent.id ? "#6366f1" : "#e5e7eb",
+                    boxShadow: selectedId === archiveEvent.id ? "0 0 0 1px #6366f1" : "none",
+                  }}
+                >
+                  {artworkUrl ? (
+                    <img src={artworkUrl} alt="" style={{ width: 54, height: 54, borderRadius: 6, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
+                  ) : (
+                    <span style={{ width: 54, height: 54, borderRadius: 6, background: "#f3f4f6", border: "1px solid #e5e7eb", flexShrink: 0 }} />
+                  )}
+                  <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 4, textAlign: "left" }}>
+                    <strong style={{ fontSize: 13, color: "#111827", overflowWrap: "anywhere" }}>{archiveEvent.title}</strong>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>{archiveEvent.artist_name || "Unknown artist"}</span>
+                    <span style={{ fontSize: 11, color: "#6b7280" }}>{formatAdminDateTime(archiveEvent.starts_at ?? "")} - {formatAdminDateTime(archiveEvent.ends_at ?? "")}</span>
+                    <span style={{ fontSize: 11, color: "#374151" }}>{archiveEvent.status} · {counts.total} messages · {counts.approved} approved · {counts.pending + counts.rejected} pending/rejected</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
+
+      {selectedEvent && (
+        <Panel title="Archived Event Detail">
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 160px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+            <ArchiveImagePreview event={selectedEvent} />
+            <div style={{ display: "grid", gap: 8 }}>
+              <h2 style={{ margin: 0, fontSize: 18 }}>{selectedEvent.title}</h2>
+              <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>{selectedEvent.artist_name || "Unknown artist"}</p>
+              <p style={{ margin: 0, color: "#374151", fontSize: 13 }}>Start: {formatAdminDateTime(selectedEvent.starts_at ?? "")}</p>
+              <p style={{ margin: 0, color: "#374151", fontSize: 13 }}>End: {formatAdminDateTime(selectedEvent.ends_at ?? "")}</p>
+              <p style={{ margin: 0, color: "#374151", fontSize: 13 }}>Status: {selectedEvent.status}</p>
+              <p style={{ margin: 0, color: "#374151", fontSize: 13 }}>Audio: {selectedEvent.audio_path ? selectedEvent.audio_path.split("/").pop() : "No audio uploaded"}</p>
+              <p style={{ margin: 0, color: "#374151", fontSize: 13 }}>
+                {selectedCounts.total} total · {selectedCounts.approved} approved · {selectedCounts.pending} pending · {selectedCounts.rejected} rejected · {selectedCounts.pinned} pinned · {selectedCounts.highlighted} highlighted · {selectedCounts.admin} admin
+              </p>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {selectedEvent && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+          <ArchiveMessageSection title="Approved" messages={selectedMessages.filter(message => message.status === "approved")} />
+          <ArchiveMessageSection title="Pending" messages={selectedMessages.filter(message => message.status === "pending")} />
+          <ArchiveMessageSection title="Rejected" messages={selectedMessages.filter(message => message.status === "rejected")} />
+          <ArchiveMessageSection title="Pinned" messages={selectedMessages.filter(message => message.is_pinned)} />
+          <ArchiveMessageSection title="Highlighted" messages={selectedMessages.filter(message => message.is_highlighted)} />
+          <ArchiveMessageSection title="Admin Published" messages={selectedMessages.filter(message => message.is_admin)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ArchiveImagePreview({ event }: { event: MusicEvent }) {
+  const artworkUrl = getPublicImageUrl("artwork", event.artwork_path);
+  const artistUrl = getPublicImageUrl("artist-images", event.artist_image_path);
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {artworkUrl ? (
+        <img src={artworkUrl} alt="Archived artwork preview" style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+      ) : (
+        <div style={{ width: "100%", aspectRatio: "1 / 1", borderRadius: 8, border: "1px solid #e5e7eb", background: "#f3f4f6", display: "grid", placeItems: "center", color: "#6b7280", fontSize: 12 }}>No artwork</div>
+      )}
+      {artistUrl && <img src={artistUrl} alt="Archived artist preview" style={{ width: "54%", aspectRatio: "4 / 5", objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />}
+    </div>
+  );
+}
+
+function ArchiveMessageSection({ title, messages }: { title: string; messages: ChatMessage[] }) {
+  return (
+    <Panel title={`${title} (${messages.length})`}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflowY: "auto" }}>
+        {messages.length === 0 && <p style={{ fontSize: 13, color: "#9ca3af" }}>No messages.</p>}
+        {messages.map(message => (
+          <div key={`${title}-${message.id}`} style={chatMessageStyle(message)}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+              <strong style={{ fontSize: 12 }}>{message.display_name}</strong>
+              <span style={{ fontSize: 11, color: "#6b7280" }}>{formatChatTime(message.created_at)}</span>
+              <span style={badgeStyle}>{message.status}</span>
+              {message.is_admin && <span style={badgeStyle}>Admin</span>}
+              {message.is_pinned && <span style={badgeStyle}>Pinned</span>}
+              {message.is_highlighted && <span style={badgeStyle}>Highlighted</span>}
+              {message.is_liked && <span style={badgeStyle}>Liked</span>}
+            </div>
+            <p style={{ fontSize: 13, color: "#374151", overflowWrap: "anywhere" }}>{message.body}</p>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 function ChatModerationPanel({
   event,
-  ensureEvent,
   chat,
   busy,
   setBusy,
@@ -461,7 +695,6 @@ function ChatModerationPanel({
   message,
 }: {
   event: MusicEvent | null;
-  ensureEvent: () => Promise<MusicEvent>;
   chat: ReturnType<typeof useEventChat>;
   busy: boolean;
   setBusy: (busy: boolean) => void;
@@ -490,8 +723,8 @@ function ChatModerationPanel({
   async function submitAdminMessage(submitEvent: FormEvent) {
     submitEvent.preventDefault();
     await run("Admin message published.", async () => {
-      const baseEvent = event ?? await ensureEvent();
-      await sendAdminMessage({ event_id: baseEvent.id, body });
+      if (!event) throw new Error("Start an active event before publishing admin chat messages.");
+      await sendAdminMessage({ event_id: event.id, body });
       setBody("");
     });
   }
@@ -504,11 +737,13 @@ function ChatModerationPanel({
             value={body}
             onChange={event => setBody(event.target.value)}
             maxLength={500}
-            placeholder={event ? "Write an admin message..." : "Save or create an event to start chat..."}
+            disabled={!event || busy}
+            placeholder={event ? "Write an admin message..." : "No active event is available for chat."}
             style={inputStyle}
           />
-          <button disabled={busy || !body.trim()} type="submit" style={buttonStyle("#6366f1")}>Publish</button>
+          <button disabled={busy || !event || !body.trim()} type="submit" style={buttonStyle("#6366f1")}>Publish</button>
         </form>
+        {!event && <p style={noteStyle}>The active Chat tab only shows messages for the current upcoming or live event. Finished events are available in Archived Events.</p>}
         {chat.loading && <p style={noteStyle}>Loading chat...</p>}
         {chat.error && <p style={{ ...noteStyle, color: "#b91c1c" }}>{chat.error}</p>}
         {message && <p style={{ ...noteStyle, color: "#15803d" }}>{message}</p>}
@@ -689,6 +924,18 @@ const darkBadgeStyle: React.CSSProperties = {
   border: "1px solid rgba(0,255,65,0.42)",
   borderRadius: 999,
   padding: "1px 6px",
+};
+
+const archiveCardStyle: React.CSSProperties = {
+  width: "100%",
+  display: "flex",
+  gap: 12,
+  alignItems: "flex-start",
+  padding: 12,
+  border: "1px solid #e5e7eb",
+  borderRadius: 8,
+  background: "#fff",
+  cursor: "pointer",
 };
 
 function tabButtonStyle(active: boolean): React.CSSProperties {
