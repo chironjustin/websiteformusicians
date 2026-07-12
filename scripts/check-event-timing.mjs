@@ -67,9 +67,14 @@ assert(localSelected.getHours() === 16 && localSelected.getMinutes() === 36, "St
 
 const publicPage = readFileSync("src/pages/PublicEventPage.tsx", "utf8");
 assert(publicPage.includes('if (state !== "live")'), "Public page must not request audio while upcoming.");
-assert(publicPage.includes("{audioUrl && ("), "Live audio player should render only when a signed URL exists.");
+assert(publicPage.includes("{audioUrl && <AudioPlayer"), "Live audio player should render only when a signed URL exists.");
 assert(publicPage.includes('useEventChat(state === "live" ? event?.id : undefined'), "Public chat subscription must only initialize while live.");
-assert(publicPage.includes('{state === "live" && (') && publicPage.includes("<ChatDrawer"), "Public chat drawer must only render while live.");
+assert(publicPage.includes("<LiveEventView"), "Public page must render a dedicated LiveEventView for the live state.");
+assert(publicPage.includes("function LiveEventView") && publicPage.includes("function UpcomingPage") && publicPage.includes("function FinishedPage"), "Public page must keep distinct stage components.");
+assert(!publicPage.includes("function StatusPanel") && !publicPage.includes("function ChatDrawer"), "Public debug/status switcher and drawer path must not render publicly.");
+assert(!publicPage.includes("function LivePage"), "Live state must not use the old artwork-based LivePage.");
+assert(!publicPage.includes("Artwork size={320}"), "Live state must not mount the Upcoming artwork composition.");
+assert(publicPage.includes("join chat") && publicPage.includes("choose name:"), "Live state must include the centered chat entry composition.");
 assert(publicPage.includes('live={authoritativeState === "live"}'), "Public chat submission must depend on authoritative database live status.");
 
 const eventTiming = readFileSync("src/lib/eventTiming.ts", "utf8");

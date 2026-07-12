@@ -252,59 +252,11 @@ function AudioPlayer({ audioUrl }: { audioUrl: string }) {
   );
 }
 
-function StatusPanel({ state, chatOpen, onToggleChat }: { state: DisplayState; chatOpen: boolean; onToggleChat: () => void }) {
-  const states: DisplayState[] = ["upcoming", "live", "finished"];
-  return (
-    <nav style={{
-      position: "fixed",
-      bottom: 16,
-      right: 16,
-      zIndex: 9998,
-      display: "flex",
-      flexDirection: "column",
-      gap: 3,
-      background: "rgba(0,0,0,0.92)",
-      border: `1px solid ${GREEN}`,
-      padding: "8px 10px",
-    }}>
-      <span style={{ fontFamily: VT, fontSize: "0.7rem", color: "rgba(0,255,65,0.4)", letterSpacing: "0.15em", marginBottom: 2 }}>status</span>
-      {states.map(item => (
-        <span key={item} style={{
-          fontFamily: VT,
-          fontSize: "0.85rem",
-          letterSpacing: "0.1em",
-          color: state === item ? BG : GREEN,
-          background: state === item ? GREEN : "transparent",
-          padding: "2px 8px",
-          textAlign: "left",
-        }}>
-          {state === item ? "› " : "  "}{item}
-        </span>
-      ))}
-      {state === "live" && (
-        <button onClick={onToggleChat} style={{
-          fontFamily: VT,
-          fontSize: "0.85rem",
-          color: chatOpen ? BG : GREEN,
-          background: chatOpen ? GREEN : "transparent",
-          border: "none",
-          padding: "2px 8px",
-          textAlign: "left",
-          letterSpacing: "0.1em",
-        }}>
-          {chatOpen ? "› " : "  "}chat
-        </button>
-      )}
-    </nav>
-  );
-}
-
-function Shell({ children, state, chatOpen, onToggleChat }: { children: React.ReactNode; state: DisplayState; chatOpen: boolean; onToggleChat: () => void }) {
+function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main className="public-event-shell" style={{ position: "relative", minHeight: "100vh", background: BG, color: "#fff", overflow: "hidden" }}>
       <GlobalStyles />
       <CRTOverlay />
-      <StatusPanel state={state} chatOpen={chatOpen} onToggleChat={onToggleChat} />
       {children}
     </main>
   );
@@ -314,7 +266,6 @@ export default function PublicEventPage() {
   const { event, loading, error } = useCurrentEvent();
   const [audioUrl, setAudioUrl] = useState("");
   const [now, setNow] = useState(new Date());
-  const [chatOpen, setChatOpen] = useState(false);
   const state = event ? getEventDisplayState(event, now) : "upcoming";
   const authoritativeState = event?.status ?? "upcoming";
   const waitingForLiveStatus = state === "live" && authoritativeState === "upcoming";
@@ -374,21 +325,21 @@ export default function PublicEventPage() {
   const countdownTarget = getCountdownTarget(event, state);
 
   return (
-    <Shell state={state} chatOpen={chatOpen} onToggleChat={() => setChatOpen(open => !open)}>
+    <Shell>
       {state !== "finished" && <DVDBounce imageUrl={images.artist} />}
       {state === "upcoming" && <UpcomingPage title={title} artworkUrl={images.artwork} startsAt={countdownTarget} />}
-      {state === "live" && <LivePage title={title} artworkUrl={images.artwork} audioUrl={audioUrl} liveTarget={countdownTarget} waitingForLiveStatus={waitingForLiveStatus} />}
-      {state === "finished" && <FinishedPage event={event} title={title} merchImage={images.merch} />}
       {state === "live" && (
-        <ChatDrawer
+        <LiveEventView
+          title={title}
+          audioUrl={audioUrl}
+          liveTarget={countdownTarget}
           eventId={event.id}
           messages={chat.messages}
-          open={chatOpen}
           live={authoritativeState === "live"}
           starting={waitingForLiveStatus}
-          onClose={() => setChatOpen(false)}
         />
       )}
+      {state === "finished" && <FinishedPage event={event} title={title} merchImage={images.merch} />}
     </Shell>
   );
 }
@@ -419,29 +370,138 @@ function UpcomingPage({ title, artworkUrl, startsAt }: { title: string; artworkU
   );
 }
 
-function LivePage({ title, artworkUrl, audioUrl, liveTarget, waitingForLiveStatus }: { title: string; artworkUrl: string; audioUrl: string; liveTarget: string | null; waitingForLiveStatus: boolean }) {
+function LiveEventView({ title, audioUrl, liveTarget, eventId, messages, live, starting }: { title: string; audioUrl: string; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
   return (
     <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: "clamp(1.25rem, 4vh, 2.5rem)", padding: "2rem", width: "min(640px, 92vw)" }}>
-        <Countdown target={liveTarget} mode="remaining" />
-        <p style={{ fontFamily: VT, fontSize: "clamp(1rem, 3vw, 1.6rem)", color: "rgba(255,255,255,0.55)", textAlign: "center", letterSpacing: "0.04em" }}>
-          {title}
-        </p>
-        <Artwork size={320} imageUrl={artworkUrl} />
-        {waitingForLiveStatus && (
+      <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: "clamp(1.25rem, 4vh, 2.5rem)", padding: "2rem", width: "min(520px, 92vw)" }}>
+        <div style={{ width: "100%", display: "grid", gap: "0.75rem" }}>
+          <p style={{ fontFamily: VT, fontSize: "clamp(1.4rem, 4vw, 2rem)", color: "rgba(255,255,255,0.55)", letterSpacing: "0.06em" }}>
+            {title}
+          </p>
+          {audioUrl && <AudioPlayer audioUrl={audioUrl} />}
+        </div>
+        <div style={{ width: "100%", height: 1, background: "rgba(0,255,65,0.16)" }} />
+        <div style={{ textAlign: "center", display: "grid", gap: "0.6rem" }}>
+          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.55)", fontSize: "1.1rem", letterSpacing: "0.16em" }}>live ends in</p>
+          <Countdown target={liveTarget} mode="remaining" />
+        </div>
+        {starting && (
           <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em" }}>
             event is starting...
           </p>
         )}
-        {audioUrl && (
-          <div style={{ width: "100%", maxWidth: 480 }}>
-            <AudioPlayer audioUrl={audioUrl} />
-          </div>
-        )}
+        <LiveChatPanel eventId={eventId} messages={messages} live={live} starting={starting} />
       </div>
     </div>
   );
 }
+
+function LiveChatPanel({ eventId, messages, live, starting }: { eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
+  const [displayName, setDisplayName] = useState("");
+  const [body, setBody] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+  const [lastSentAt, setLastSentAt] = useState(0);
+
+  async function submitMessage(event: React.FormEvent) {
+    event.preventDefault();
+    if (!live || sending) return;
+
+    const sentAt = Date.now();
+    if (sentAt - lastSentAt < 8_000) {
+      setError("wait a few seconds before sending another message.");
+      return;
+    }
+
+    setSending(true);
+    setError("");
+    setFeedback("");
+    try {
+      await sendVisitorMessage({ event_id: eventId, display_name: displayName, body });
+      setBody("");
+      setLastSentAt(sentAt);
+      setFeedback("message sent for approval.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message.toLowerCase() : "message failed.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <section style={{ width: "100%", display: "grid", gap: "1rem", marginTop: "clamp(1rem, 7vh, 5rem)" }}>
+      <div style={{ textAlign: "center", display: "grid", gap: "0.9rem" }}>
+        <p style={{ fontFamily: PSP, fontSize: "clamp(1rem, 4vw, 1.55rem)", color: "#FFFFFF", letterSpacing: "0.06em" }}>join chat</p>
+        <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.25rem", letterSpacing: "0.22em" }}>choose name:</p>
+      </div>
+
+      <div style={{ maxHeight: 150, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+        {messages.length === 0 && (
+          <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.36)", fontSize: "1.05rem", textAlign: "center" }}>no approved messages yet.</p>
+        )}
+        {messages.map(message => (
+          <div key={message.id} style={{
+            borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
+            padding: "0.25rem 0 0.25rem 0.65rem",
+            background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
+            order: message.is_pinned ? -1 : 0,
+          }}>
+            <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em" }}>
+              {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
+            </p>
+            <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
+          </div>
+        ))}
+      </div>
+
+      {live ? (
+        <form onSubmit={submitMessage} style={{ display: "grid", gap: "0.75rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: `2px solid ${GREEN}`, paddingBottom: "0.35rem" }}>
+            <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
+            <input value={displayName} onChange={event => setDisplayName(event.target.value)} maxLength={50} aria-label="Display name" style={terminalInputStyle} />
+            <span className="cursor-blink" style={{ width: 10, height: 3, background: GREEN }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: "2px solid rgba(0,255,65,0.65)", paddingBottom: "0.35rem" }}>
+            <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
+            <input value={body} onChange={event => setBody(event.target.value)} maxLength={500} aria-label="Message" style={terminalInputStyle} />
+          </div>
+          <button disabled={sending || !displayName.trim() || !body.trim()} style={{
+            justifySelf: "center",
+            width: "min(180px, 70%)",
+            background: "rgba(0,255,65,0.22)",
+            color: BG,
+            border: "none",
+            padding: "0.65rem 1rem",
+            fontFamily: VT,
+            fontSize: "1.2rem",
+            letterSpacing: "0.25em",
+          }}>
+            [ enter ]
+          </button>
+          {feedback && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", textAlign: "center" }}>{feedback}</p>}
+          {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem", textAlign: "center" }}>{error}</p>}
+        </form>
+      ) : (
+        <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "1.05rem", textAlign: "center" }}>
+          {starting ? "event is starting. chat will open in a moment." : "chat is closed."}
+        </p>
+      )}
+    </section>
+  );
+}
+
+const terminalInputStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  background: "transparent",
+  border: "none",
+  outline: "none",
+  color: "#FFFFFF",
+  fontFamily: VT,
+  fontSize: "1.25rem",
+  letterSpacing: "0.08em",
+};
 
 function FinishedPage({ event, title, merchImage }: { event: MusicEvent; title: string; merchImage: string }) {
   const linkStyle: React.CSSProperties = {
@@ -508,108 +568,3 @@ function FinishedPage({ event, title, merchImage }: { event: MusicEvent; title: 
     </div>
   );
 }
-
-function ChatDrawer({ eventId, messages, open, live, starting, onClose }: { eventId: string; messages: ChatMessage[]; open: boolean; live: boolean; starting: boolean; onClose: () => void }) {
-  const [displayName, setDisplayName] = useState("");
-  const [body, setBody] = useState("");
-  const [feedback, setFeedback] = useState("");
-  const [error, setError] = useState("");
-  const [sending, setSending] = useState(false);
-  const [lastSentAt, setLastSentAt] = useState(0);
-
-  async function submitMessage(event: React.FormEvent) {
-    event.preventDefault();
-    if (!live || sending) return;
-
-    const sentAt = Date.now();
-    if (sentAt - lastSentAt < 8_000) {
-      setError("wait a few seconds before sending another message.");
-      return;
-    }
-
-    setSending(true);
-    setError("");
-    setFeedback("");
-    try {
-      await sendVisitorMessage({ event_id: eventId, display_name: displayName, body });
-      setBody("");
-      setLastSentAt(sentAt);
-      setFeedback("message sent for approval.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message.toLowerCase() : "message failed.");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <aside style={{
-      position: "fixed",
-      top: 0,
-      right: 0,
-      bottom: 0,
-      zIndex: 9999,
-      width: "min(360px, 92vw)",
-      background: "rgba(0,0,0,0.96)",
-      borderLeft: `1px solid ${GREEN}`,
-      transform: open ? "translateX(0)" : "translateX(100%)",
-      transition: "transform 180ms ease",
-      display: "flex",
-      flexDirection: "column",
-      padding: "1rem",
-      color: "#fff",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", borderBottom: "1px solid rgba(0,255,65,0.18)", paddingBottom: "0.75rem" }}>
-        <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.3rem", letterSpacing: "0.12em" }}>live chat</p>
-        <span className="cursor-blink" style={{ fontFamily: VT, color: GREEN }}>_</span>
-        <button onClick={onClose} style={{ marginLeft: "auto", fontFamily: VT, color: GREEN, background: "transparent", border: "none", fontSize: "1.1rem" }}>close</button>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.8rem", padding: "1rem 0" }}>
-        {messages.length === 0 && <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "1.05rem" }}>no approved messages yet.</p>}
-        {messages.map(message => (
-          <div key={message.id} style={{
-            border: `1px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.18)"}`,
-            padding: "0.55rem 0.65rem",
-            background: message.is_highlighted ? "rgba(0,255,65,0.08)" : "transparent",
-            order: message.is_pinned ? -1 : 0,
-          }}>
-            <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.04em" }}>
-              {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
-            </p>
-            <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.2rem", lineHeight: 1.2, overflowWrap: "anywhere" }}>{message.body}</p>
-          </div>
-        ))}
-      </div>
-
-      {live ? (
-        <form onSubmit={submitMessage} style={{ borderTop: "1px solid rgba(0,255,65,0.18)", paddingTop: "0.75rem", display: "grid", gap: "0.55rem" }}>
-          <input value={displayName} onChange={event => setDisplayName(event.target.value)} maxLength={50} placeholder="name" style={chatInputStyle} />
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <input value={body} onChange={event => setBody(event.target.value)} maxLength={500} placeholder="message..." style={chatInputStyle} />
-            <button disabled={sending || !displayName.trim() || !body.trim()} style={{ fontFamily: VT, background: GREEN, color: BG, border: "none", padding: "0 0.8rem", fontSize: "1.1rem" }}>
-              send
-            </button>
-          </div>
-          {feedback && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>{feedback}</p>}
-          {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem" }}>{error}</p>}
-        </form>
-      ) : (
-        <p style={{ borderTop: "1px solid rgba(0,255,65,0.18)", paddingTop: "0.75rem", fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "1.05rem" }}>
-          {starting ? "event is starting. chat will open in a moment." : "chat is closed."}
-        </p>
-      )}
-    </aside>
-  );
-}
-
-const chatInputStyle: React.CSSProperties = {
-  width: "100%",
-  minWidth: 0,
-  background: "transparent",
-  color: "#fff",
-  border: "1px solid rgba(0,255,65,0.35)",
-  padding: "0.5rem 0.6rem",
-  fontFamily: VT,
-  fontSize: "1.05rem",
-};
