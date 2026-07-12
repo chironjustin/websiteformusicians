@@ -8,6 +8,7 @@ create table if not exists public.chat_messages (
   display_name text not null,
   body text not null,
   status text not null default 'pending',
+  client_token uuid,
   is_admin boolean not null default false,
   is_pinned boolean not null default false,
   is_highlighted boolean not null default false,
@@ -21,6 +22,7 @@ create table if not exists public.chat_messages (
 
 create index if not exists chat_messages_event_status_created_idx on public.chat_messages(event_id, status, created_at);
 create index if not exists chat_messages_event_pinned_created_idx on public.chat_messages(event_id, is_pinned desc, created_at);
+create index if not exists chat_messages_event_client_token_idx on public.chat_messages(event_id, client_token) where client_token is not null;
 
 drop trigger if exists set_chat_messages_updated_at on public.chat_messages;
 create trigger set_chat_messages_updated_at
@@ -53,12 +55,35 @@ with check (
   and is_pinned = false
   and is_highlighted = false
   and is_liked = false
+  and client_token is not null
   and exists (
     select 1 from public.events
     where events.id = chat_messages.event_id
       and events.status = 'live'
   )
 );
+
+create or replace function public.get_visitor_chat_message_status(
+  message_id uuid,
+  message_event_id uuid,
+  message_client_token uuid
+)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select status
+  from public.chat_messages
+  where id = message_id
+    and event_id = message_event_id
+    and client_token = message_client_token
+  limit 1;
+$$;
+
+revoke all on function public.get_visitor_chat_message_status(uuid, uuid, uuid) from public;
+grant execute on function public.get_visitor_chat_message_status(uuid, uuid, uuid) to anon, authenticated;
 
 drop policy if exists "Owners can read all chat messages" on public.chat_messages;
 create policy "Owners can read all chat messages"

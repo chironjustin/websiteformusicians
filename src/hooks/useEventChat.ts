@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getAdminChatMessages, getPublicChatMessages } from "@/services/chatService";
 import type { ChatMessage } from "@/types/chat";
@@ -9,8 +9,12 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(Boolean(eventId));
   const [error, setError] = useState<string | null>(null);
+  const activeScopeRef = useRef("");
 
   const loadMessages = useCallback(async () => {
+    const scope = `${mode}:${eventId ?? ""}`;
+    activeScopeRef.current = scope;
+
     if (!eventId) {
       setMessages([]);
       setLoading(false);
@@ -22,13 +26,23 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode)
       const nextMessages = mode === "admin"
         ? await getAdminChatMessages(eventId)
         : await getPublicChatMessages(eventId);
+      if (activeScopeRef.current !== scope) return;
       setMessages(nextMessages);
       setError(null);
     } catch (err) {
+      if (activeScopeRef.current !== scope) return;
       setError(err instanceof Error ? err.message : "Unable to load chat.");
     } finally {
+      if (activeScopeRef.current !== scope) return;
       setLoading(false);
     }
+  }, [eventId, mode]);
+
+  useEffect(() => {
+    activeScopeRef.current = `${mode}:${eventId ?? ""}`;
+    setMessages([]);
+    setError(null);
+    setLoading(Boolean(eventId));
   }, [eventId, mode]);
 
   useEffect(() => {

@@ -84,7 +84,21 @@ assert(publicPage.includes("removeEventChatIdentity(priorEventId)") && publicPag
 assert(publicPage.includes("key={event.id}"), "Live view must remount when the event id changes to reset drafts and temporary state.");
 assert(publicPage.includes("function ActiveChatComposer") && publicPage.includes("displayName={joinedName}"), "Message composer must appear only after the visitor joins.");
 assert(publicPage.includes("function LiveMessageStream"), "Approved messages must render independently from the join state.");
+assert(publicPage.includes("pendingSubmission") && publicPage.includes("Waiting..."), "Submitted visitor messages must show Waiting while the tracked row is pending.");
+assert(publicPage.includes("getVisitorMessageStatus(eventId, pendingSubmission.id, pendingSubmission.clientToken)"), "Waiting state must check the submitted message status by event id, row id, and client token.");
 assert(publicPage.includes('live={authoritativeState === "live"}'), "Public chat submission must depend on authoritative database live status.");
+
+const chatHook = readFileSync("src/hooks/useEventChat.ts", "utf8");
+assert(chatHook.includes("setMessages([])") && chatHook.includes("activeScopeRef"), "Changing event ids must clear stale chat messages and ignore stale fetches.");
+assert(chatHook.includes("filter: `event_id=eq.${eventId}`"), "Realtime chat subscription must be scoped to the active event id.");
+
+const chatService = readFileSync("src/services/chatService.ts", "utf8");
+assert(chatService.includes('.eq("event_id", eventId)') && chatService.includes('.eq("status", "approved")'), "Public chat query must fetch approved messages for the active event only.");
+assert(chatService.includes("client_token: input.client_token") && chatService.includes("get_visitor_chat_message_status"), "Visitor submissions must carry a client token and status lookup must use the scoped RPC.");
+
+const chatSchema = readFileSync("supabase/chat-schema.sql", "utf8");
+assert(chatSchema.includes("event_id uuid not null") && chatSchema.includes("client_token uuid"), "Chat schema must associate messages with events and pending-status client tokens.");
+assert(chatSchema.includes("chat_messages_event_status_created_idx") && chatSchema.includes("chat_messages_event_client_token_idx"), "Chat schema must include event-scoped retrieval indexes.");
 
 const eventTiming = readFileSync("src/lib/eventTiming.ts", "utf8");
 assert(eventTiming.includes("return event.ends_at;"), "Live countdown target must use explicit ends_at.");

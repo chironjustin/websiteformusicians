@@ -7,6 +7,7 @@ export interface ChatMessage {
   display_name: string;
   body: string;
   status: ChatMessageStatus;
+  client_token: string | null;
   is_admin: boolean;
   is_pinned: boolean;
   is_highlighted: boolean;
@@ -19,6 +20,7 @@ export interface CreateVisitorChatMessageInput {
   event_id: string;
   display_name: string;
   body: string;
+  client_token?: string;
 }
 
 export interface CreateAdminChatMessageInput {

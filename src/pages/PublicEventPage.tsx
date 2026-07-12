@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemainingMilliseconds } from "@/lib/eventTiming";
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
-import { sendVisitorMessage } from "@/services/chatService";
+import { getVisitorMessageStatus, sendVisitorMessage } from "@/services/chatService";
 import { getPublicImageUrl, getSignedAudioUrl } from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
 import type { MusicEvent } from "@/types/event";
@@ -561,14 +561,45 @@ function JoinChatPanel({ eventId, storageKey, onJoin }: { eventId: string; stora
 
 function ActiveChatComposer({ eventId, displayName, live, starting }: { eventId: string; displayName: string; live: boolean; starting: boolean }) {
   const [body, setBody] = useState("");
-  const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingSubmission, setPendingSubmission] = useState<{ id: string; clientToken: string } | null>(null);
   const [lastSentAt, setLastSentAt] = useState(0);
+
+  useEffect(() => {
+    setBody("");
+    setError("");
+    setSending(false);
+    setPendingSubmission(null);
+  }, [eventId]);
+
+  useEffect(() => {
+    if (!pendingSubmission) return;
+
+    let active = true;
+    const checkStatus = async () => {
+      try {
+        const status = await getVisitorMessageStatus(eventId, pendingSubmission.id, pendingSubmission.clientToken);
+        if (!active) return;
+        if (status !== "pending") {
+          setPendingSubmission(null);
+        }
+      } catch {
+        if (active) setPendingSubmission(null);
+      }
+    };
+
+    checkStatus();
+    const id = window.setInterval(checkStatus, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+  }, [eventId, pendingSubmission]);
 
   async function submitMessage(event: React.FormEvent) {
     event.preventDefault();
-    if (!live || sending) return;
+    if (!live || sending || pendingSubmission) return;
 
     const sentAt = Date.now();
     if (sentAt - lastSentAt < 8_000) {
@@ -578,12 +609,12 @@ function ActiveChatComposer({ eventId, displayName, live, starting }: { eventId:
 
     setSending(true);
     setError("");
-    setFeedback("");
     try {
-      await sendVisitorMessage({ event_id: eventId, display_name: displayName, body });
+      const clientToken = crypto.randomUUID();
+      const message = await sendVisitorMessage({ event_id: eventId, display_name: displayName, body, client_token: clientToken });
       setBody("");
       setLastSentAt(sentAt);
-      setFeedback("message sent for approval.");
+      setPendingSubmission({ id: message.id, clientToken });
     } catch (err) {
       setError(err instanceof Error ? err.message.toLowerCase() : "message failed.");
     } finally {
@@ -599,10 +630,10 @@ function ActiveChatComposer({ eventId, displayName, live, starting }: { eventId:
             <span style={{ width: 26, height: 14, background: "repeating-linear-gradient(0deg, rgba(255,255,255,0.35), rgba(255,255,255,0.35) 2px, transparent 2px, transparent 4px)" }} />
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.05rem", letterSpacing: "0.06em" }}>{displayName}</span>
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
-            <input value={body} onChange={event => setBody(event.target.value)} maxLength={500} aria-label="Message" style={{ ...terminalInputStyle, fontSize: "1.05rem" }} />
-            <button disabled={sending || !body.trim()} style={{ ...enterButtonStyle, width: "auto", padding: "0.35rem 0.7rem", fontSize: "1rem", letterSpacing: "0.12em" }}>send</button>
+            <input value={body} onChange={event => setBody(event.target.value)} disabled={Boolean(pendingSubmission)} maxLength={500} aria-label="Message" style={{ ...terminalInputStyle, fontSize: "1.05rem" }} />
+            <button disabled={sending || Boolean(pendingSubmission) || !body.trim()} style={{ ...enterButtonStyle, width: "auto", padding: "0.35rem 0.7rem", fontSize: "1rem", letterSpacing: "0.12em" }}>send</button>
           </div>
-          {feedback && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>{feedback}</p>}
+          {pendingSubmission && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>Waiting...</p>}
           {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem" }}>{error}</p>}
         </form>
       ) : (

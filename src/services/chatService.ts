@@ -57,6 +57,7 @@ export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
       event_id: input.event_id,
       display_name: displayName,
       body,
+      client_token: input.client_token ?? null,
       status: "pending",
       is_admin: false,
       is_pinned: false,
@@ -68,6 +69,17 @@ export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
 
   if (error) throw new Error(error.message);
   return data;
+}
+
+export async function getVisitorMessageStatus(eventId: string, messageId: string, clientToken: string) {
+  const { data, error } = await supabase.rpc("get_visitor_chat_message_status", {
+    message_event_id: eventId,
+    message_id: messageId,
+    message_client_token: clientToken,
+  });
+
+  if (error) throw new Error(error.message);
+  return data as ChatMessageStatus | null;
 }
 
 export async function sendAdminMessage(input: CreateAdminChatMessageInput) {
