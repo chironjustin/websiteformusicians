@@ -225,47 +225,93 @@ function Countdown({ target, mode = "countdown" }: { target: string | null; mode
   );
 }
 
-function AudioPlayer({ audioUrl }: { audioUrl: string }) {
+function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: string | null }) {
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  const getLivePosition = () => {
+    if (!startsAt || duration <= 0) return 0;
+    const startedAt = new Date(startsAt).getTime();
+    if (Number.isNaN(startedAt)) return 0;
+    const elapsed = Math.max(0, (Date.now() - startedAt) / 1000);
+    return elapsed % duration;
+  };
+
+  const syncToLive = (force = false) => {
+    const audio = audioRef.current;
+    if (!audio || duration <= 0) return;
+    const nextPosition = getLivePosition();
+    const directDrift = Math.abs(audio.currentTime - nextPosition);
+    const loopDrift = duration - directDrift;
+    const drift = Math.min(directDrift, loopDrift);
+    if (force || drift > 1.5) {
+      audio.currentTime = nextPosition;
+    }
+    setProgress(nextPosition);
+  };
+
   const toggle = () => {
     const audio = audioRef.current;
     if (!audio || !audioUrl) return;
-    playing ? audio.pause() : audio.play().catch(() => {});
-    setPlaying(!playing);
+    if (playing) {
+      audio.pause();
+      return;
+    }
+    syncToLive(true);
+    audio.play().catch(() => {});
   };
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const onTime = () => setProgress(audio.currentTime);
-    const onMeta = () => setDuration(audio.duration || 0);
+    const onTime = () => {
+      if (duration > 0 && !audio.paused) syncToLive(false);
+    };
+    const onMeta = () => {
+      const nextDuration = audio.duration || 0;
+      setDuration(nextDuration);
+      if (nextDuration > 0) {
+        const startedAt = startsAt ? new Date(startsAt).getTime() : Number.NaN;
+        const nextProgress = Number.isNaN(startedAt) ? 0 : Math.max(0, ((Date.now() - startedAt) / 1000)) % nextDuration;
+        setProgress(nextProgress);
+      }
+    };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
+    const onCanPlay = () => syncToLive(false);
+    const onVisibility = () => {
+      if (!document.hidden) syncToLive(false);
+    };
 
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("loadedmetadata", onMeta);
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
+    audio.addEventListener("canplay", onCanPlay);
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       audio.removeEventListener("timeupdate", onTime);
       audio.removeEventListener("loadedmetadata", onMeta);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("canplay", onCanPlay);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [audioUrl]);
+  }, [audioUrl, duration, startsAt]);
 
-  const seek = (event: React.MouseEvent<HTMLDivElement>) => {
-    const audio = audioRef.current;
-    if (!audio || !duration) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    audio.currentTime = ((event.clientX - rect.left) / rect.width) * duration;
-  };
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (duration <= 0) return;
+      const livePosition = getLivePosition();
+      setProgress(livePosition);
+      if (playing) syncToLive(false);
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [duration, playing, startsAt]);
 
   const pct = duration > 0 ? (progress / duration) * 100 : 0;
 
@@ -290,7 +336,14 @@ function AudioPlayer({ audioUrl }: { audioUrl: string }) {
         >
           {playing ? "■" : "▶"}
         </button>
-        <div onClick={seek} style={{ minWidth: 24, width: "100%", height: "2px", background: "rgba(0,255,65,0.18)", position: "relative" }}>
+        <div
+          role="progressbar"
+          aria-label={`Live audio position ${fmtSecs(Math.floor(progress))}`}
+          aria-valuemin={0}
+          aria-valuemax={duration || 0}
+          aria-valuenow={progress}
+          style={{ minWidth: 24, width: "100%", height: "2px", background: "rgba(0,255,65,0.18)", position: "relative", pointerEvents: "none" }}
+        >
           <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${pct}%`, background: GREEN, transition: "width 0.4s linear" }} />
         </div>
         <span style={{ fontFamily: VT, fontSize: "clamp(0.9rem, 2.9vw, 1.2rem)", color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
@@ -465,6 +518,7 @@ export default function PublicEventPage() {
           title={title}
           artistUrl={images.artist}
           audioUrl={audioUrl}
+          startsAt={event.starts_at}
           liveTarget={countdownTarget}
           eventId={event.id}
           messages={chat.messages}
@@ -521,7 +575,6 @@ function ArtistPortrait({ imageUrl }: { imageUrl: string }) {
 }
 
 function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
-  const areaRef = useRef<HTMLDivElement>(null);
   const portraitRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const posRef = useRef({ x: 0, y: 0 });
@@ -531,12 +584,13 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     const resetPosition = () => {
-      const area = areaRef.current?.getBoundingClientRect();
       const portrait = portraitRef.current?.getBoundingClientRect();
-      if (!area || !portrait) return;
+      if (!portrait) return;
+      const maxX = Math.max(0, window.innerWidth - portrait.width);
+      const maxY = Math.max(0, window.innerHeight - portrait.height);
       const next = {
-        x: Math.max(0, (area.width - portrait.width) / 2),
-        y: Math.max(0, area.height * 0.24),
+        x: Math.max(0, Math.min(maxX, posRef.current.x || window.innerWidth * 0.5)),
+        y: Math.max(0, Math.min(maxY, posRef.current.y || window.innerHeight * 0.45)),
       };
       posRef.current = next;
       setPos(next);
@@ -551,13 +605,12 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
 
     let raf = 0;
     const tick = () => {
-      const area = areaRef.current?.getBoundingClientRect();
       const portrait = portraitRef.current?.getBoundingClientRect();
-      if (area && portrait) {
+      if (portrait) {
         let nextX = posRef.current.x + velocity.current.x;
         let nextY = posRef.current.y + velocity.current.y;
-        const maxX = Math.max(0, area.width - portrait.width);
-        const maxY = Math.max(0, area.height - portrait.height);
+        const maxX = Math.max(0, window.innerWidth - portrait.width);
+        const maxY = Math.max(0, window.innerHeight - portrait.height);
 
         if (nextX <= 0 || nextX >= maxX) {
           velocity.current.x *= -1;
@@ -586,27 +639,23 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
 
   return (
     <div
-      ref={areaRef}
       aria-hidden="true"
       style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        top: "5.8rem",
-        bottom: "5.6rem",
+        position: "fixed",
+        inset: 0,
         zIndex: 1,
         pointerEvents: "none",
         overflow: "hidden",
       }}
     >
-      <div ref={portraitRef} style={{ position: "absolute", left: pos.x, top: pos.y }}>
+      <div ref={portraitRef} style={{ position: "absolute", left: 0, top: 0, transform: `translate3d(${pos.x}px, ${pos.y}px, 0)`, willChange: "transform" }}>
         <ArtistPortrait imageUrl={imageUrl} />
       </div>
     </div>
   );
 }
 
-function LiveEventView({ title, artistUrl, audioUrl, liveTarget, eventId, messages, live, starting }: { title: string; artistUrl: string; audioUrl: string; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
+function LiveEventView({ title, artistUrl, audioUrl, startsAt, liveTarget, eventId, messages, live, starting }: { title: string; artistUrl: string; audioUrl: string; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
   const joinedNameKey = getEventChatNameKey(eventId);
   const [joinedName, setJoinedName] = useState("");
 
@@ -617,7 +666,7 @@ function LiveEventView({ title, artistUrl, audioUrl, liveTarget, eventId, messag
   return (
     <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", padding: "2.2rem 1.75rem 1.25rem" }}>
       <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
-        <LiveAudioHeader title={title} audioUrl={audioUrl} liveTarget={liveTarget} />
+        <LiveAudioHeader title={title} audioUrl={audioUrl} startsAt={startsAt} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
         <LiveMessageStream messages={messages} joined={Boolean(joinedName)} eventId={eventId} artistUrl={artistUrl} />
         <BouncingArtistPortrait imageUrl={artistUrl} />
@@ -636,14 +685,14 @@ function LiveEventView({ title, artistUrl, audioUrl, liveTarget, eventId, messag
   );
 }
 
-function LiveAudioHeader({ title, audioUrl, liveTarget }: { title: string; audioUrl: string; liveTarget: string | null }) {
+function LiveAudioHeader({ title, audioUrl, startsAt, liveTarget }: { title: string; audioUrl: string; startsAt: string | null; liveTarget: string | null }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center", gap: "clamp(0.45rem, 2vw, 1.2rem)", width: "100%", minWidth: 0 }}>
       <p style={{ fontFamily: VT, fontSize: "clamp(1rem, 3.4vw, 1.85rem)", color: "rgba(255,255,255,0.38)", letterSpacing: "0.04em", minWidth: 0, maxWidth: "clamp(6ch, 22vw, 18ch)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {title}
       </p>
       <div style={{ minWidth: 0 }}>
-        {audioUrl && <AudioPlayer audioUrl={audioUrl} />}
+        {audioUrl && <AudioPlayer audioUrl={audioUrl} startsAt={startsAt} />}
       </div>
       <CompactLiveCountdown target={liveTarget} />
     </div>
