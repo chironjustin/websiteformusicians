@@ -14,6 +14,10 @@ const PSP = "'Press Start 2P', cursive";
 
 type DisplayState = "upcoming" | "live" | "finished";
 
+const CHAT_NAME_KEY_PREFIX = "music-event-chat-name:";
+const CHAT_AVATAR_KEY_PREFIX = "music-event-chat-avatar:";
+const LEGACY_CHAT_IDENTITY_KEYS = ["live-chat-name", "chat-name", "username", "joined-chat"];
+
 function pad2(value: number) {
   return String(Math.floor(value)).padStart(2, "0");
 }
@@ -262,10 +266,26 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
+function getEventChatNameKey(eventId: string) {
+  return `${CHAT_NAME_KEY_PREFIX}${eventId}`;
+}
+
+function removeEventChatIdentity(eventId: string) {
+  window.localStorage.removeItem(getEventChatNameKey(eventId));
+  window.localStorage.removeItem(`${CHAT_AVATAR_KEY_PREFIX}${eventId}`);
+}
+
+function removeLegacyChatIdentity() {
+  for (const key of LEGACY_CHAT_IDENTITY_KEYS) {
+    window.localStorage.removeItem(key);
+  }
+}
+
 export default function PublicEventPage() {
   const { event, loading, error } = useCurrentEvent();
   const [audioUrl, setAudioUrl] = useState("");
   const [now, setNow] = useState(new Date());
+  const previousEventId = useRef<string | null>(null);
   const state = event ? getEventDisplayState(event, now) : "upcoming";
   const authoritativeState = event?.status ?? "upcoming";
   const waitingForLiveStatus = state === "live" && authoritativeState === "upcoming";
@@ -275,6 +295,25 @@ export default function PublicEventPage() {
     const id = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    removeLegacyChatIdentity();
+  }, []);
+
+  useEffect(() => {
+    const currentEventId = event?.id ?? null;
+    const priorEventId = previousEventId.current;
+
+    if (priorEventId && priorEventId !== currentEventId) {
+      removeEventChatIdentity(priorEventId);
+    }
+
+    if (currentEventId && state === "finished") {
+      removeEventChatIdentity(currentEventId);
+    }
+
+    previousEventId.current = currentEventId;
+  }, [event?.id, state]);
 
   useEffect(() => {
     let active = true;
@@ -330,6 +369,7 @@ export default function PublicEventPage() {
       {state === "upcoming" && <UpcomingPage title={title} artworkUrl={images.artwork} startsAt={countdownTarget} />}
       {state === "live" && (
         <LiveEventView
+          key={event.id}
           title={title}
           artistUrl={images.artist}
           audioUrl={audioUrl}
@@ -399,7 +439,7 @@ function ArtistPortrait({ imageUrl }: { imageUrl: string }) {
 }
 
 function LiveEventView({ title, artistUrl, audioUrl, liveTarget, eventId, messages, live, starting }: { title: string; artistUrl: string; audioUrl: string; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
-  const joinedNameKey = `music-event-chat-name:${eventId}`;
+  const joinedNameKey = getEventChatNameKey(eventId);
   const [joinedName, setJoinedName] = useState("");
 
   useEffect(() => {
