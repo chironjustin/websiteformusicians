@@ -566,7 +566,7 @@ function LiveEventView({ title, artistUrl, audioUrl, liveTarget, eventId, messag
       <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
         <LiveAudioHeader title={title} audioUrl={audioUrl} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
-        <LiveMessageStream messages={messages} joined={Boolean(joinedName)} eventId={eventId} />
+        <LiveMessageStream messages={messages} joined={Boolean(joinedName)} eventId={eventId} artistUrl={artistUrl} />
         <BouncingArtistPortrait imageUrl={artistUrl} joined={Boolean(joinedName)} />
         <div style={{ position: "absolute", left: 0, right: 0, top: "7.5rem", display: "flex", justifyContent: "space-between", pointerEvents: "none" }}>
           <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.08)", fontSize: "1.25rem", letterSpacing: "0.18em" }}>live ends</p>
@@ -600,7 +600,7 @@ function LiveAudioHeader({ title, audioUrl }: { title: string; audioUrl: string 
   );
 }
 
-function LiveMessageStream({ messages, joined, eventId }: { messages: ChatMessage[]; joined: boolean; eventId: string }) {
+function LiveMessageStream({ messages, joined, eventId, artistUrl }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistUrl: string }) {
   return (
     <section style={{
       position: "absolute",
@@ -637,10 +637,34 @@ function LiveMessageStream({ messages, joined, eventId }: { messages: ChatMessag
               {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
             </p>
             <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
+            {message.is_liked && <ArtistLikeIndicator artistUrl={artistUrl} />}
           </div>
         </div>
       ))}
     </section>
+  );
+}
+
+function ArtistLikeIndicator({ artistUrl }: { artistUrl: string }) {
+  if (!artistUrl) return null;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", marginTop: "0.25rem" }}>
+      <img
+        src={artistUrl}
+        alt=""
+        aria-hidden="true"
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: "50%",
+          objectFit: "cover",
+          display: "block",
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "0.95rem", letterSpacing: "0.04em" }}>likes</span>
+    </div>
   );
 }
 

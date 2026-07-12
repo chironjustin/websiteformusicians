@@ -962,7 +962,7 @@ function ChatPreview({ messages, busy, run }: { messages: ChatMessage[]; busy: b
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
               <SmallButton disabled={busy} onClick={() => run(message.is_pinned ? "Message unpinned." : "Message pinned.", () => updateMessageFlags(message.id, { is_pinned: !message.is_pinned }).then(() => undefined))}>{message.is_pinned ? "Unpin" : "Pin"}</SmallButton>
               <SmallButton disabled={busy} onClick={() => run(message.is_highlighted ? "Highlight removed." : "Message highlighted.", () => updateMessageFlags(message.id, { is_highlighted: !message.is_highlighted }).then(() => undefined))}>{message.is_highlighted ? "Remove Highlight" : "Highlight"}</SmallButton>
-              <SmallButton disabled={busy} onClick={() => run(message.is_liked ? "Like removed." : "Message liked.", () => updateMessageFlags(message.id, { is_liked: !message.is_liked }).then(() => undefined))}>{message.is_liked ? "Unlike" : "Like"}</SmallButton>
+              <SmallButton disabled={busy} onClick={() => run(message.is_liked ? "Like removed." : "Message liked.", () => updateMessageFlags(message.id, { is_liked: !message.is_liked }).then(() => undefined))}>{message.is_liked ? "Unlike" : "Like as Artist"}</SmallButton>
               <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(message.id))}>Delete</SmallButton>
             </div>
           </div>
