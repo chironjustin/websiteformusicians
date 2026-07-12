@@ -22,7 +22,8 @@ create table if not exists public.events (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint events_status_check check (status in ('draft', 'upcoming', 'live', 'finished')),
-  constraint events_duration_positive check (duration_hours is null or duration_hours > 0)
+  constraint events_duration_positive check (duration_hours is null or duration_hours > 0),
+  constraint events_end_after_start check (starts_at is null or ends_at is null or ends_at > starts_at)
 );
 
 create index if not exists events_owner_id_idx on public.events(owner_id);

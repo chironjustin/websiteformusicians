@@ -1,5 +1,4 @@
 import { supabase } from "@/lib/supabase";
-import { addHoursUtc } from "@/lib/eventTiming";
 import type { CreateEventInput, MusicEvent, UpdateEventInput } from "@/types/event";
 
 const PUBLIC_STATUSES = ["upcoming", "live", "finished"];
@@ -9,20 +8,40 @@ function toUsefulError(error: unknown, fallback: string) {
   return new Error(fallback);
 }
 
-function calculateEndsAt(startsAt: string | null | undefined, durationHours: number | null | undefined) {
-  if (!startsAt) return null;
-  return addHoursUtc(startsAt, durationHours);
-}
-
 function validateStartable(event: Partial<MusicEvent>) {
   if (!event.title?.trim()) throw new Error("Add an event title before starting.");
   if (!event.audio_path) throw new Error("Upload an audio file before starting.");
   if (!event.artwork_path && !event.artist_image_path) {
     throw new Error("Upload artwork or an artist image before starting.");
   }
-  if (!event.ends_at && (!event.duration_hours || event.duration_hours <= 0)) {
-    throw new Error("Add a valid duration or end time before starting.");
+  validateEventWindow(event.starts_at, event.ends_at);
+}
+
+function validateEventWindow(startsAt: string | null | undefined, endsAt: string | null | undefined) {
+  if (!startsAt) throw new Error("Choose an event start date and time.");
+  if (!endsAt) throw new Error("Choose an event end date and time.");
+
+  const startTime = new Date(startsAt).getTime();
+  const endTime = new Date(endsAt).getTime();
+
+  if (Number.isNaN(startTime)) throw new Error("Enter a valid event start date and time.");
+  if (Number.isNaN(endTime)) throw new Error("Enter a valid event end date and time.");
+  if (endTime <= startTime) throw new Error("Event End Date and Time must be later than Event Start Date and Time.");
+}
+
+function shiftWindowToNow(startsAt: string, endsAt: string) {
+  const startTime = new Date(startsAt).getTime();
+  const endTime = new Date(endsAt).getTime();
+  const originalLength = endTime - startTime;
+  if (!Number.isFinite(originalLength) || originalLength <= 0) {
+    throw new Error("Event End Date and Time must be later than Event Start Date and Time.");
   }
+
+  const now = new Date();
+  return {
+    starts_at: now.toISOString(),
+    ends_at: new Date(now.getTime() + originalLength).toISOString(),
+  };
 }
 
 async function requireUserId() {
@@ -86,13 +105,11 @@ export async function startEvent(id: string, latest?: UpdateEventInput) {
   const existing = await getEventById(id);
   if (!existing) throw new Error("Event not found.");
 
-  const now = new Date();
-  const startsAt = now.toISOString();
-  const candidate = { ...existing, ...latest, starts_at: startsAt };
-  const endsAt = calculateEndsAt(startsAt, candidate.duration_hours);
-  validateStartable({ ...candidate, ends_at: endsAt });
+  const candidate = { ...existing, ...latest };
+  validateStartable(candidate);
+  const shifted = shiftWindowToNow(candidate.starts_at!, candidate.ends_at!);
 
-  return updateEvent(id, { ...latest, status: "live", starts_at: startsAt, ends_at: endsAt });
+  return updateEvent(id, { ...latest, status: "live", ...shifted });
 }
 
 export async function endEvent(id: string) {
@@ -103,8 +120,7 @@ export async function scheduleEvent(id: string, input: UpdateEventInput) {
   if (!input.starts_at) throw new Error("Choose a future start date and time.");
   if (new Date(input.starts_at).getTime() <= Date.now()) throw new Error("Scheduled start time must be in the future.");
   validateStartable(input);
-  const endsAt = calculateEndsAt(input.starts_at, input.duration_hours);
-  return updateEvent(id, { ...input, status: "upcoming", ends_at: endsAt });
+  return updateEvent(id, { ...input, status: "upcoming" });
 }
 
 export async function deleteEvent(id: string) {

@@ -6,6 +6,7 @@
 - [ ] Enable email/password authentication.
 - [ ] Create the first admin user in Supabase Auth.
 - [ ] Run `supabase/schema.sql` in the SQL editor.
+- [ ] Run `supabase/event-end-times-migration.sql` in the SQL editor to backfill explicit end timestamps for older duration-based events.
 - [ ] Run `supabase/chat-schema.sql` in the SQL editor.
 - [ ] Run `supabase/event-status-cron.sql` in the SQL editor.
 - [ ] Confirm Supabase Cron is enabled/available and the `update-event-statuses` job runs every minute.
@@ -32,7 +33,7 @@
 - [ ] Create and save a draft at `/admin`.
 - [ ] Upload artwork or artist image.
 - [ ] Upload audio.
-- [ ] Select a local start time and confirm it still displays the same local time after save/refresh.
+- [ ] Select local Event Start Date and Time and Event End Date and Time values and confirm both still display the same local times after save/refresh.
 - [ ] Schedule or start the event.
 - [ ] Confirm `/` updates without a redeploy.
 - [ ] Submit a visitor chat message on `/` during a live event.

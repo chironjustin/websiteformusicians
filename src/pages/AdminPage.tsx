@@ -17,7 +17,7 @@ type FormState = {
   title: string;
   artist_name: string;
   starts_at: string;
-  duration_hours: string;
+  ends_at: string;
   support_url: string;
   merch_url: string;
   event_url: string;
@@ -34,7 +34,7 @@ const emptyForm: FormState = {
   title: "",
   artist_name: "",
   starts_at: "",
-  duration_hours: "12",
+  ends_at: "",
   support_url: "",
   merch_url: "",
   event_url: "",
@@ -191,14 +191,26 @@ export default function AdminPage() {
     }
   }
 
+  function validateEventWindow() {
+    if (!form.starts_at) throw new Error("Choose an event start date and time.");
+    if (!form.ends_at) throw new Error("Choose an event end date and time.");
+
+    const startsAt = new Date(form.starts_at).getTime();
+    const endsAt = new Date(form.ends_at).getTime();
+
+    if (Number.isNaN(startsAt)) throw new Error("Enter a valid event start date and time.");
+    if (Number.isNaN(endsAt)) throw new Error("Enter a valid event end date and time.");
+    if (endsAt <= startsAt) throw new Error("Event End Date and Time must be later than Event Start Date and Time.");
+  }
+
   function toUpdateInput(extra?: UpdateEventInput): UpdateEventInput {
     const startsAt = dateTimeLocalToUtc(form.starts_at);
-    const duration = Number.parseFloat(form.duration_hours);
+    const endsAt = dateTimeLocalToUtc(form.ends_at);
     return {
       title: form.title.trim() || "Untitled Event",
       artist_name: form.artist_name.trim() || null,
       starts_at: startsAt,
-      duration_hours: Number.isFinite(duration) ? duration : null,
+      ends_at: endsAt,
       support_url: form.support_url.trim() || null,
       merch_url: form.merch_url.trim() || null,
       event_url: form.event_url.trim() || null,
@@ -212,6 +224,7 @@ export default function AdminPage() {
     setMessage("");
     try {
       validateUrls();
+      validateEventWindow();
       const baseEvent = await ensureEvent();
       const uploadUpdates = await uploadPendingFiles(baseEvent);
       const latest = toUpdateInput(uploadUpdates);
@@ -238,7 +251,7 @@ export default function AdminPage() {
       return;
     }
     await runAction(
-      `Event scheduled for ${formatAdminDateTime(form.starts_at)}.`,
+      `Event scheduled from ${formatAdminDateTime(form.starts_at)} to ${formatAdminDateTime(form.ends_at)}.`,
       async (baseEvent, updates) => scheduleEvent(baseEvent.id, updates),
     );
   }
@@ -322,8 +335,8 @@ export default function AdminPage() {
             <Grid>
               <Field label="Event Title" value={form.title} onChange={value => setField("title", value)} />
               <Field label="Artist Name" value={form.artist_name} onChange={value => setField("artist_name", value)} />
-              <Field label="Start Date and Time" type="datetime-local" value={form.starts_at} onChange={value => setField("starts_at", value)} />
-              <Field label="Duration (hours)" type="number" value={form.duration_hours} onChange={value => setField("duration_hours", value)} />
+              <Field label="Event Start Date and Time" type="datetime-local" value={form.starts_at} onChange={value => setField("starts_at", value)} />
+              <Field label="Event End Date and Time" type="datetime-local" value={form.ends_at} onChange={value => setField("ends_at", value)} />
             </Grid>
           </Panel>
 
@@ -410,7 +423,7 @@ function fromEvent(event: MusicEvent): FormState {
     title: event.title ?? "",
     artist_name: event.artist_name ?? "",
     starts_at: formatDateTimeLocal(event.starts_at),
-    duration_hours: event.duration_hours ? String(event.duration_hours) : "12",
+    ends_at: formatDateTimeLocal(event.ends_at),
     support_url: event.support_url ?? "",
     merch_url: event.merch_url ?? "",
     event_url: event.event_url ?? "",

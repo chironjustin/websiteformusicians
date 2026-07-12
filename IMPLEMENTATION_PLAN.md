@@ -55,8 +55,8 @@
 ## Automatic timing implementation
 
 - `starts_at` is the timestamp when an event becomes live.
-- `ends_at` is the timestamp when an event becomes finished.
-- `duration_hours` is used only to calculate `ends_at` from `starts_at`; it is never the upcoming countdown target.
+- `ends_at` is the authoritative Event End Date and Time, and it is edited directly in the admin form.
+- `duration_hours` remains only as a legacy compatibility column for older deployments; `supabase/event-end-times-migration.sql` backfills `ends_at` once from `starts_at + duration_hours`.
 - Upcoming public countdowns target `starts_at`.
 - Live public countdowns target `ends_at`.
 - `supabase/event-status-cron.sql` creates `public.update_scheduled_event_statuses()` and schedules the `update-event-statuses` Supabase Cron job to run every minute.
