@@ -75,6 +75,10 @@ assert(!publicPage.includes("function StatusPanel") && !publicPage.includes("fun
 assert(!publicPage.includes("function LivePage"), "Live state must not use the old artwork-based LivePage.");
 assert(!publicPage.includes("Artwork size={320}"), "Live state must not mount the Upcoming artwork composition.");
 assert(publicPage.includes("join chat") && publicPage.includes("choose name:"), "Live state must include the centered chat entry composition.");
+assert(publicPage.includes("music-event-chat-name:${eventId}"), "Live chat name must be stored per event.");
+assert(publicPage.includes("window.localStorage.setItem(storageKey, name)"), "Joining chat must persist the event-specific display name.");
+assert(publicPage.includes("function ActiveChatComposer") && publicPage.includes("displayName={joinedName}"), "Message composer must appear only after the visitor joins.");
+assert(publicPage.includes("function LiveMessageStream"), "Approved messages must render independently from the join state.");
 assert(publicPage.includes('live={authoritativeState === "live"}'), "Public chat submission must depend on authoritative database live status.");
 
 const eventTiming = readFileSync("src/lib/eventTiming.ts", "utf8");

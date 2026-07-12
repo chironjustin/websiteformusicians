@@ -326,11 +326,12 @@ export default function PublicEventPage() {
 
   return (
     <Shell>
-      {state !== "finished" && <DVDBounce imageUrl={images.artist} />}
+      {state === "upcoming" && <DVDBounce imageUrl={images.artist} />}
       {state === "upcoming" && <UpcomingPage title={title} artworkUrl={images.artwork} startsAt={countdownTarget} />}
       {state === "live" && (
         <LiveEventView
           title={title}
+          artistUrl={images.artist}
           audioUrl={audioUrl}
           liveTarget={countdownTarget}
           eventId={event.id}
@@ -370,34 +371,155 @@ function UpcomingPage({ title, artworkUrl, startsAt }: { title: string; artworkU
   );
 }
 
-function LiveEventView({ title, audioUrl, liveTarget, eventId, messages, live, starting }: { title: string; audioUrl: string; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
+function ArtistPortrait({ imageUrl }: { imageUrl: string }) {
+  const src = imageUrl.trim() || PLACEHOLDER_SRC;
+  const corners = [
+    { top: -2, left: -2 },
+    { top: -2, right: -2 },
+    { bottom: -2, left: -2 },
+    { bottom: -2, right: -2 },
+  ];
+
   return (
-    <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: "clamp(1.25rem, 4vh, 2.5rem)", padding: "2rem", width: "min(520px, 92vw)" }}>
-        <div style={{ width: "100%", display: "grid", gap: "0.75rem" }}>
-          <p style={{ fontFamily: VT, fontSize: "clamp(1.4rem, 4vw, 2rem)", color: "rgba(255,255,255,0.55)", letterSpacing: "0.06em" }}>
-            {title}
-          </p>
-          {audioUrl && <AudioPlayer audioUrl={audioUrl} />}
+    <div style={{
+      width: 126,
+      aspectRatio: "1 / 1",
+      border: `2px solid ${GREEN}`,
+      position: "relative",
+      overflow: "hidden",
+      background: BG,
+      boxShadow: "0 0 18px rgba(0,255,65,0.12)",
+    }}>
+      <img src={src} alt="Artist" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", imageRendering: "pixelated", opacity: 0.82 }} />
+      {corners.map((corner, index) => (
+        <div key={index} style={{ position: "absolute", width: 8, height: 8, background: GREEN, zIndex: 1, ...corner }} />
+      ))}
+    </div>
+  );
+}
+
+function LiveEventView({ title, artistUrl, audioUrl, liveTarget, eventId, messages, live, starting }: { title: string; artistUrl: string; audioUrl: string; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
+  const joinedNameKey = `music-event-chat-name:${eventId}`;
+  const [joinedName, setJoinedName] = useState("");
+
+  useEffect(() => {
+    setJoinedName(window.localStorage.getItem(joinedNameKey) ?? "");
+  }, [joinedNameKey]);
+
+  return (
+    <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", padding: "2.2rem 1.75rem 1.25rem" }}>
+      <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
+        <LiveAudioHeader title={title} audioUrl={audioUrl} />
+        <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
+        <LiveMessageStream messages={messages} joined={Boolean(joinedName)} />
+        <div style={{ position: "absolute", left: "50%", top: joinedName ? "31%" : "19%", transform: "translateX(-50%)", zIndex: 2 }}>
+          <ArtistPortrait imageUrl={artistUrl} />
         </div>
-        <div style={{ width: "100%", height: 1, background: "rgba(0,255,65,0.16)" }} />
-        <div style={{ textAlign: "center", display: "grid", gap: "0.6rem" }}>
-          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.55)", fontSize: "1.1rem", letterSpacing: "0.16em" }}>live ends in</p>
-          <Countdown target={liveTarget} mode="remaining" />
+        <div style={{ position: "absolute", left: 0, right: 0, top: "7.5rem", display: "flex", justifyContent: "space-between", pointerEvents: "none" }}>
+          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.08)", fontSize: "1.25rem", letterSpacing: "0.18em" }}>live ends</p>
+          <span style={{ opacity: 0.12 }}><Countdown target={liveTarget} mode="remaining" /></span>
         </div>
         {starting && (
-          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em" }}>
+          <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
             event is starting...
           </p>
         )}
-        <LiveChatPanel eventId={eventId} messages={messages} live={live} starting={starting} />
+        {joinedName ? (
+          <ActiveChatComposer eventId={eventId} displayName={joinedName} live={live} starting={starting} />
+        ) : (
+          <JoinChatPanel eventId={eventId} storageKey={joinedNameKey} onJoin={setJoinedName} />
+        )}
       </div>
     </div>
   );
 }
 
-function LiveChatPanel({ eventId, messages, live, starting }: { eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
+function LiveAudioHeader({ title, audioUrl }: { title: string; audioUrl: string }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "start", gap: "1.6rem", width: "100%" }}>
+      <p style={{ fontFamily: VT, fontSize: "clamp(1.35rem, 4vw, 1.85rem)", color: "rgba(255,255,255,0.38)", letterSpacing: "0.04em", paddingTop: "0.35rem" }}>
+        {title}
+      </p>
+      <div style={{ minWidth: 0, paddingTop: 0 }}>
+        {audioUrl && <AudioPlayer audioUrl={audioUrl} />}
+      </div>
+    </div>
+  );
+}
+
+function LiveMessageStream({ messages, joined }: { messages: ChatMessage[]; joined: boolean }) {
+  return (
+    <section style={{
+      position: "absolute",
+      left: 0,
+      right: 0,
+      top: joined ? "6.2rem" : "8.1rem",
+      bottom: joined ? "5rem" : "17rem",
+      overflowY: "auto",
+      display: "flex",
+      flexDirection: "column",
+      gap: "0.75rem",
+      opacity: messages.length > 0 ? 1 : joined ? 0.9 : 0.28,
+    }}>
+      {joined && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(0,255,65,0.15)", paddingBottom: "0.7rem", marginBottom: "0.5rem" }}>
+          <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.45rem", letterSpacing: "0.22em" }}>live chat</p>
+          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.4)", fontSize: "1.05rem", letterSpacing: "0.1em" }}>{messages.length} msgs</p>
+        </div>
+      )}
+      {messages.map(message => (
+        <div key={message.id} style={{
+          maxWidth: "88%",
+          borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
+          padding: "0.25rem 0 0.25rem 0.65rem",
+          background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
+          order: message.is_pinned ? -1 : 0,
+        }}>
+          <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em" }}>
+            {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
+          </p>
+          <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function JoinChatPanel({ eventId, storageKey, onJoin }: { eventId: string; storageKey: string; onJoin: (name: string) => void }) {
   const [displayName, setDisplayName] = useState("");
+  const [error, setError] = useState("");
+
+  function join(event: React.FormEvent) {
+    event.preventDefault();
+    const name = displayName.replace(/\s+/g, " ").trim().slice(0, 50);
+    if (!name) {
+      setError("choose a name first.");
+      return;
+    }
+    window.localStorage.setItem(storageKey, name);
+    onJoin(name);
+  }
+
+  return (
+    <form onSubmit={join} style={{ position: "absolute", left: "50%", bottom: "clamp(8.5rem, 18vh, 13rem)", transform: "translateX(-50%)", width: "min(350px, 82vw)", display: "grid", gap: "1.25rem", zIndex: 3 }}>
+      <div style={{ textAlign: "center", display: "grid", gap: "0.9rem" }}>
+        <p style={{ fontFamily: PSP, fontSize: "clamp(1rem, 4vw, 1.55rem)", color: "#FFFFFF", letterSpacing: "0.06em" }}>join chat</p>
+        <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.25rem", letterSpacing: "0.22em" }}>choose name:</p>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: `2px solid ${GREEN}`, paddingBottom: "0.35rem" }}>
+        <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
+        <input value={displayName} onChange={event => setDisplayName(event.target.value)} maxLength={50} aria-label="Display name" autoComplete={`event-${eventId}-name`} style={terminalInputStyle} />
+        <span className="cursor-blink" style={{ width: 10, height: 3, background: GREEN }} />
+      </div>
+      <button disabled={!displayName.trim()} style={enterButtonStyle}>
+        [ enter ]
+      </button>
+      {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem", textAlign: "center" }}>{error}</p>}
+    </form>
+  );
+}
+
+function ActiveChatComposer({ eventId, displayName, live, starting }: { eventId: string; displayName: string; live: boolean; starting: boolean }) {
   const [body, setBody] = useState("");
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
@@ -430,66 +552,39 @@ function LiveChatPanel({ eventId, messages, live, starting }: { eventId: string;
   }
 
   return (
-    <section style={{ width: "100%", display: "grid", gap: "1rem", marginTop: "clamp(1rem, 7vh, 5rem)" }}>
-      <div style={{ textAlign: "center", display: "grid", gap: "0.9rem" }}>
-        <p style={{ fontFamily: PSP, fontSize: "clamp(1rem, 4vw, 1.55rem)", color: "#FFFFFF", letterSpacing: "0.06em" }}>join chat</p>
-        <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.25rem", letterSpacing: "0.22em" }}>choose name:</p>
-      </div>
-
-      <div style={{ maxHeight: 150, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-        {messages.length === 0 && (
-          <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.36)", fontSize: "1.05rem", textAlign: "center" }}>no approved messages yet.</p>
-        )}
-        {messages.map(message => (
-          <div key={message.id} style={{
-            borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
-            padding: "0.25rem 0 0.25rem 0.65rem",
-            background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
-            order: message.is_pinned ? -1 : 0,
-          }}>
-            <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em" }}>
-              {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
-            </p>
-            <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
-          </div>
-        ))}
-      </div>
-
+    <div style={{ position: "fixed", left: "1.75rem", right: "1.75rem", bottom: "max(1.2rem, env(safe-area-inset-bottom))", zIndex: 20 }}>
       {live ? (
-        <form onSubmit={submitMessage} style={{ display: "grid", gap: "0.75rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: `2px solid ${GREEN}`, paddingBottom: "0.35rem" }}>
+        <form onSubmit={submitMessage} style={{ display: "grid", gap: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", borderTop: "1px solid rgba(0,255,65,0.1)", paddingTop: "0.7rem" }}>
+            <span style={{ width: 26, height: 14, background: "repeating-linear-gradient(0deg, rgba(255,255,255,0.35), rgba(255,255,255,0.35) 2px, transparent 2px, transparent 4px)" }} />
+            <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.05rem", letterSpacing: "0.06em" }}>{displayName}</span>
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
-            <input value={displayName} onChange={event => setDisplayName(event.target.value)} maxLength={50} aria-label="Display name" style={terminalInputStyle} />
-            <span className="cursor-blink" style={{ width: 10, height: 3, background: GREEN }} />
+            <input value={body} onChange={event => setBody(event.target.value)} maxLength={500} aria-label="Message" style={{ ...terminalInputStyle, fontSize: "1.05rem" }} />
+            <button disabled={sending || !body.trim()} style={{ ...enterButtonStyle, width: "auto", padding: "0.35rem 0.7rem", fontSize: "1rem", letterSpacing: "0.12em" }}>send</button>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: "2px solid rgba(0,255,65,0.65)", paddingBottom: "0.35rem" }}>
-            <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
-            <input value={body} onChange={event => setBody(event.target.value)} maxLength={500} aria-label="Message" style={terminalInputStyle} />
-          </div>
-          <button disabled={sending || !displayName.trim() || !body.trim()} style={{
-            justifySelf: "center",
-            width: "min(180px, 70%)",
-            background: "rgba(0,255,65,0.22)",
-            color: BG,
-            border: "none",
-            padding: "0.65rem 1rem",
-            fontFamily: VT,
-            fontSize: "1.2rem",
-            letterSpacing: "0.25em",
-          }}>
-            [ enter ]
-          </button>
-          {feedback && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", textAlign: "center" }}>{feedback}</p>}
-          {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem", textAlign: "center" }}>{error}</p>}
+          {feedback && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>{feedback}</p>}
+          {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem" }}>{error}</p>}
         </form>
       ) : (
-        <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "1.05rem", textAlign: "center" }}>
+        <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "1.05rem" }}>
           {starting ? "event is starting. chat will open in a moment." : "chat is closed."}
         </p>
       )}
-    </section>
+    </div>
   );
 }
+
+const enterButtonStyle: React.CSSProperties = {
+  justifySelf: "center",
+  width: "min(180px, 70%)",
+  background: "rgba(0,255,65,0.22)",
+  color: BG,
+  border: "none",
+  padding: "0.65rem 1rem",
+  fontFamily: VT,
+  fontSize: "1.2rem",
+  letterSpacing: "0.25em",
+};
 
 const terminalInputStyle: React.CSSProperties = {
   flex: 1,
