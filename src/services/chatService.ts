@@ -140,6 +140,24 @@ export async function updateMessageFlags(id: string, flags: Partial<Pick<ChatMes
   return data;
 }
 
+export async function setMessagePinned(id: string, pinned: boolean) {
+  const { error } = await supabase.rpc("set_chat_message_pin", {
+    message_id: id,
+    pinned,
+  });
+
+  if (error) throw new Error(error.message);
+}
+
+export async function setMessageHighlighted(id: string, highlighted: boolean) {
+  const { error } = await supabase.rpc("set_chat_message_highlight", {
+    message_id: id,
+    highlighted,
+  });
+
+  if (error) throw new Error(error.message);
+}
+
 export async function deleteChatMessage(id: string) {
   const { error } = await supabase.from("chat_messages").delete().eq("id", id);
   if (error) throw new Error(error.message);

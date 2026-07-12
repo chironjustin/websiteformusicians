@@ -3,7 +3,7 @@ import { Radio } from "lucide-react";
 import { dateTimeLocalToUtc, formatDateTimeLocal } from "@/lib/datetime";
 import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
-import { assignChatMessageToEvent, deleteChatMessage, getAdminChatMessages, getUnassignedLegacyChatMessages, sendAdminMessage, setMessageStatus, updateMessageFlags } from "@/services/chatService";
+import { assignChatMessageToEvent, deleteChatMessage, getAdminChatMessages, getUnassignedLegacyChatMessages, sendAdminMessage, setMessageHighlighted, setMessagePinned, setMessageStatus, updateMessageFlags } from "@/services/chatService";
 import { createEvent, endEvent, getAdminEvents, startEvent, updateEvent } from "@/services/eventService";
 import { getPublicImageUrl, getSignedAudioUrl, uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage } from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
@@ -960,8 +960,8 @@ function ChatPreview({ messages, busy, run }: { messages: ChatMessage[]; busy: b
             </div>
             <p style={{ fontSize: 13, color: "rgba(255,255,255,0.82)", overflowWrap: "anywhere" }}>{message.body}</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-              <SmallButton disabled={busy} onClick={() => run(message.is_pinned ? "Message unpinned." : "Message pinned.", () => updateMessageFlags(message.id, { is_pinned: !message.is_pinned }).then(() => undefined))}>{message.is_pinned ? "Unpin" : "Pin"}</SmallButton>
-              <SmallButton disabled={busy} onClick={() => run(message.is_highlighted ? "Highlight removed." : "Message highlighted.", () => updateMessageFlags(message.id, { is_highlighted: !message.is_highlighted }).then(() => undefined))}>{message.is_highlighted ? "Remove Highlight" : "Highlight"}</SmallButton>
+              <SmallButton disabled={busy} onClick={() => run(message.is_pinned ? "Message unpinned." : "Message pinned.", () => setMessagePinned(message.id, !message.is_pinned))}>{message.is_pinned ? "Unpin" : "Pin"}</SmallButton>
+              <SmallButton disabled={busy} onClick={() => run(message.is_highlighted ? "Highlight removed." : "Message highlighted.", () => setMessageHighlighted(message.id, !message.is_highlighted))}>{message.is_highlighted ? "Remove Highlight" : "Highlight"}</SmallButton>
               <SmallButton disabled={busy} onClick={() => run(message.is_liked ? "Like removed." : "Message liked.", () => updateMessageFlags(message.id, { is_liked: !message.is_liked }).then(() => undefined))}>{message.is_liked ? "Unlike" : "Like as Artist"}</SmallButton>
               <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(message.id))}>Delete</SmallButton>
             </div>

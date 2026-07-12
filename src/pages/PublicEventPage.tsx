@@ -270,28 +270,81 @@ function AudioPlayer({ audioUrl }: { audioUrl: string }) {
   const pct = duration > 0 ? (progress / duration) * 100 : 0;
 
   return (
-    <div style={{ width: "100%" }}>
+    <div style={{ width: "100%", minWidth: 0 }}>
       {audioUrl && <audio ref={audioRef} src={audioUrl} loop />}
-      <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", marginBottom: "0.6rem" }}>
-        <button onClick={toggle} disabled={!audioUrl} style={{
+      <div style={{ display: "flex", alignItems: "center", gap: "clamp(0.35rem, 1.4vw, 0.75rem)", minWidth: 0 }}>
+        <button
+          onClick={toggle}
+          disabled={!audioUrl}
+          aria-label={playing ? "Pause audio" : "Play audio"}
+          style={{
           fontFamily: VT,
-          fontSize: "1.4rem",
+          fontSize: "clamp(1rem, 3.2vw, 1.35rem)",
           color: audioUrl ? "#FFFFFF" : "rgba(255,255,255,0.28)",
           background: "none",
           border: "none",
           padding: 0,
           letterSpacing: "0.08em",
-        }}>
+          flexShrink: 0,
+        }}
+        >
           {playing ? "■" : "▶"}
         </button>
-        <span style={{ fontFamily: VT, fontSize: "1.3rem", color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em" }}>
+        <div onClick={seek} style={{ minWidth: 24, width: "100%", height: "2px", background: "rgba(0,255,65,0.18)", position: "relative" }}>
+          <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${pct}%`, background: GREEN, transition: "width 0.4s linear" }} />
+        </div>
+        <span style={{ fontFamily: VT, fontSize: "clamp(0.9rem, 2.9vw, 1.2rem)", color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
           {fmtSecs(Math.floor(progress))}
         </span>
       </div>
-      <div onClick={seek} style={{ width: "100%", height: "2px", background: "rgba(0,255,65,0.18)", position: "relative" }}>
-        <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${pct}%`, background: GREEN, transition: "width 0.4s linear" }} />
-      </div>
     </div>
+  );
+}
+
+function CompactLiveCountdown({ target }: { target: string | null }) {
+  const [remaining, setRemaining] = useState(() => getRemainingMilliseconds(target));
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setRemaining(getRemainingMilliseconds(target));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [target]);
+
+  if (!target) return null;
+
+  const totalSeconds = Math.ceil(remaining / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const label = days > 0
+    ? `${days}d:${pad2(hours)}:${pad2(minutes)}`
+    : hours > 0
+      ? `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`
+      : `${pad2(minutes)}:${pad2(seconds)}`;
+  const accessible = days > 0
+    ? `Event ends in ${days} days, ${hours} hours, and ${minutes} minutes`
+    : hours > 0
+      ? `Event ends in ${hours} hours, ${minutes} minutes, and ${seconds} seconds`
+      : `Event ends in ${minutes} minutes and ${seconds} seconds`;
+
+  return (
+    <span
+      aria-label={accessible}
+      style={{
+        fontFamily: VT,
+        color: "rgba(0,255,65,0.52)",
+        fontSize: "clamp(0.85rem, 2.8vw, 1.15rem)",
+        letterSpacing: "0.04em",
+        fontVariantNumeric: "tabular-nums",
+        whiteSpace: "nowrap",
+        minWidth: days > 0 || hours > 0 ? "8ch" : "5.5ch",
+        textAlign: "right",
+      }}
+    >
+      ends {label}
+    </span>
   );
 }
 
@@ -467,7 +520,7 @@ function ArtistPortrait({ imageUrl }: { imageUrl: string }) {
   );
 }
 
-function BouncingArtistPortrait({ imageUrl, joined }: { imageUrl: string; joined: boolean }) {
+function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
   const areaRef = useRef<HTMLDivElement>(null);
   const portraitRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -483,7 +536,7 @@ function BouncingArtistPortrait({ imageUrl, joined }: { imageUrl: string; joined
       if (!area || !portrait) return;
       const next = {
         x: Math.max(0, (area.width - portrait.width) / 2),
-        y: Math.max(0, joined ? area.height * 0.28 : area.height * 0.1),
+        y: Math.max(0, area.height * 0.24),
       };
       posRef.current = next;
       setPos(next);
@@ -529,7 +582,7 @@ function BouncingArtistPortrait({ imageUrl, joined }: { imageUrl: string; joined
       window.removeEventListener("resize", resetPosition);
       cancelAnimationFrame(raf);
     };
-  }, [joined]);
+  }, []);
 
   return (
     <div
@@ -539,9 +592,9 @@ function BouncingArtistPortrait({ imageUrl, joined }: { imageUrl: string; joined
         position: "absolute",
         left: 0,
         right: 0,
-        top: joined ? "10.2rem" : "9rem",
-        bottom: joined ? "5.8rem" : "16rem",
-        zIndex: 2,
+        top: "5.8rem",
+        bottom: "5.6rem",
+        zIndex: 1,
         pointerEvents: "none",
         overflow: "hidden",
       }}
@@ -564,14 +617,10 @@ function LiveEventView({ title, artistUrl, audioUrl, liveTarget, eventId, messag
   return (
     <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", padding: "2.2rem 1.75rem 1.25rem" }}>
       <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
-        <LiveAudioHeader title={title} audioUrl={audioUrl} />
+        <LiveAudioHeader title={title} audioUrl={audioUrl} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
         <LiveMessageStream messages={messages} joined={Boolean(joinedName)} eventId={eventId} artistUrl={artistUrl} />
-        <BouncingArtistPortrait imageUrl={artistUrl} joined={Boolean(joinedName)} />
-        <div style={{ position: "absolute", left: 0, right: 0, top: "7.5rem", display: "flex", justifyContent: "space-between", pointerEvents: "none" }}>
-          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.08)", fontSize: "1.25rem", letterSpacing: "0.18em" }}>live ends</p>
-          <span style={{ opacity: 0.12 }}><Countdown target={liveTarget} mode="remaining" /></span>
-        </div>
+        <BouncingArtistPortrait imageUrl={artistUrl} />
         {starting && (
           <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
             event is starting...
@@ -587,61 +636,76 @@ function LiveEventView({ title, artistUrl, audioUrl, liveTarget, eventId, messag
   );
 }
 
-function LiveAudioHeader({ title, audioUrl }: { title: string; audioUrl: string }) {
+function LiveAudioHeader({ title, audioUrl, liveTarget }: { title: string; audioUrl: string; liveTarget: string | null }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "start", gap: "1.6rem", width: "100%" }}>
-      <p style={{ fontFamily: VT, fontSize: "clamp(1.35rem, 4vw, 1.85rem)", color: "rgba(255,255,255,0.38)", letterSpacing: "0.04em", paddingTop: "0.35rem" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center", gap: "clamp(0.45rem, 2vw, 1.2rem)", width: "100%", minWidth: 0 }}>
+      <p style={{ fontFamily: VT, fontSize: "clamp(1rem, 3.4vw, 1.85rem)", color: "rgba(255,255,255,0.38)", letterSpacing: "0.04em", minWidth: 0, maxWidth: "clamp(6ch, 22vw, 18ch)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {title}
       </p>
-      <div style={{ minWidth: 0, paddingTop: 0 }}>
+      <div style={{ minWidth: 0 }}>
         {audioUrl && <AudioPlayer audioUrl={audioUrl} />}
       </div>
+      <CompactLiveCountdown target={liveTarget} />
     </div>
   );
 }
 
 function LiveMessageStream({ messages, joined, eventId, artistUrl }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistUrl: string }) {
+  const pinnedMessage = messages.find(message => message.is_pinned);
+  const feedMessages = pinnedMessage ? messages.filter(message => message.id !== pinnedMessage.id) : messages;
+
   return (
     <section style={{
       position: "absolute",
       left: 0,
       right: 0,
-      top: joined ? "6.2rem" : "8.1rem",
+      top: joined ? "5.6rem" : "8.1rem",
       bottom: joined ? "5.75rem" : "17rem",
       overflowY: "auto",
       display: "flex",
       flexDirection: "column",
       gap: "0.75rem",
       opacity: messages.length > 0 ? 1 : joined ? 0.9 : 0.28,
+      zIndex: 3,
     }}>
+      {pinnedMessage && (
+        <div style={{ width: "min(100%, 620px)" }}>
+          <ChatMessageBubble message={pinnedMessage} joined={joined} eventId={eventId} artistUrl={artistUrl} pinnedArea />
+        </div>
+      )}
       {joined && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(0,255,65,0.15)", paddingBottom: "0.7rem", marginBottom: "0.5rem" }}>
           <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.45rem", letterSpacing: "0.22em" }}>live chat</p>
           <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.4)", fontSize: "1.05rem", letterSpacing: "0.1em" }}>{messages.length} msgs</p>
         </div>
       )}
-      {messages.map(message => (
-        <div key={message.id} style={{
-          maxWidth: joined ? "min(88%, 620px)" : "88%",
-          display: "flex",
-          alignItems: "flex-start",
-          gap: joined ? "0.55rem" : 0,
-          borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
-          padding: joined ? "0.45rem 0 0.45rem 0.65rem" : "0.25rem 0 0.25rem 0.65rem",
-          background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
-          order: message.is_pinned ? -1 : 0,
-        }}>
-          {joined && <ChatAvatar eventId={eventId} name={message.display_name} />}
-          <div style={{ minWidth: 0 }}>
-            <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em" }}>
-              {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
-            </p>
-            <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
-            {message.is_liked && <ArtistLikeIndicator artistUrl={artistUrl} />}
-          </div>
-        </div>
+      {feedMessages.map(message => (
+        <ChatMessageBubble key={message.id} message={message} joined={joined} eventId={eventId} artistUrl={artistUrl} />
       ))}
     </section>
+  );
+}
+
+function ChatMessageBubble({ message, joined, eventId, artistUrl, pinnedArea = false }: { message: ChatMessage; joined: boolean; eventId: string; artistUrl: string; pinnedArea?: boolean }) {
+  return (
+    <div style={{
+      maxWidth: pinnedArea ? "100%" : joined ? "min(88%, 620px)" : "88%",
+      display: "flex",
+      alignItems: "flex-start",
+      gap: joined ? "0.55rem" : 0,
+      borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
+      padding: joined ? "0.45rem 0 0.45rem 0.65rem" : "0.25rem 0 0.25rem 0.65rem",
+      background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
+    }}>
+      {joined && <ChatAvatar eventId={eventId} name={message.display_name} />}
+      <div style={{ minWidth: 0 }}>
+        <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em", overflowWrap: "anywhere" }}>
+          {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
+        </p>
+        <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
+        {message.is_liked && <ArtistLikeIndicator artistUrl={artistUrl} />}
+      </div>
+    </div>
   );
 }
 
