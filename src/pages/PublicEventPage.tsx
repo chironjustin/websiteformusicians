@@ -30,6 +30,45 @@ function fmtSecs(seconds: number) {
   return `${pad2(Math.floor(seconds / 60))}:${pad2(seconds % 60)}`;
 }
 
+function hashString(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededValue(seed: number, offset: number) {
+  const value = Math.sin(seed + offset * 999) * 10000;
+  return value - Math.floor(value);
+}
+
+function createRetroAvatar(eventId: string, name: string) {
+  const normalizedName = name.replace(/\s+/g, " ").trim().toLowerCase();
+  const seed = hashString(`${eventId}:${normalizedName || "guest"}`);
+  const hue = Math.floor(seededValue(seed, 1) * 95) + 95;
+  const accentHue = Math.floor(seededValue(seed, 2) * 60) + 180;
+  const skin = `hsl(${hue}, 56%, 42%)`;
+  const accent = `hsl(${accentHue}, 62%, 54%)`;
+  const face = seededValue(seed, 3) > 0.5 ? "round" : "square";
+  const visor = seededValue(seed, 4) > 0.55;
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" shape-rendering="crispEdges">
+  <rect width="48" height="48" fill="#050505"/>
+  <rect x="4" y="6" width="40" height="38" fill="${accent}" opacity="0.18"/>
+  <rect x="10" y="8" width="28" height="30" rx="${face === "round" ? 10 : 2}" fill="${skin}"/>
+  <rect x="14" y="14" width="6" height="6" fill="#020202"/>
+  <rect x="28" y="14" width="6" height="6" fill="#020202"/>
+  ${visor ? '<rect x="12" y="12" width="24" height="8" fill="#d7ffe1" opacity="0.45"/>' : ""}
+  <rect x="18" y="27" width="12" height="3" fill="#020202"/>
+  <rect x="8" y="36" width="32" height="8" fill="${accent}"/>
+  <rect x="2" y="2" width="6" height="6" fill="#00FF41" opacity="0.75"/>
+  <rect x="40" y="40" width="6" height="6" fill="#00FF41" opacity="0.75"/>
+</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 function GlobalStyles() {
   const css = `
     @keyframes glitch {
@@ -413,27 +452,103 @@ function UpcomingPage({ title, artworkUrl, startsAt }: { title: string; artworkU
 
 function ArtistPortrait({ imageUrl }: { imageUrl: string }) {
   const src = imageUrl.trim() || PLACEHOLDER_SRC;
-  const corners = [
-    { top: -2, left: -2 },
-    { top: -2, right: -2 },
-    { bottom: -2, left: -2 },
-    { bottom: -2, right: -2 },
-  ];
 
   return (
     <div style={{
-      width: 126,
-      aspectRatio: "1 / 1",
-      border: `2px solid ${GREEN}`,
+      width: "clamp(82px, 18vw, 126px)",
+      aspectRatio: "4 / 5",
       position: "relative",
       overflow: "hidden",
-      background: BG,
-      boxShadow: "0 0 18px rgba(0,255,65,0.12)",
+      background: "transparent",
+      filter: "contrast(1.05) saturate(0.9)",
     }}>
       <img src={src} alt="Artist" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", imageRendering: "pixelated", opacity: 0.82 }} />
-      {corners.map((corner, index) => (
-        <div key={index} style={{ position: "absolute", width: 8, height: 8, background: GREEN, zIndex: 1, ...corner }} />
-      ))}
+    </div>
+  );
+}
+
+function BouncingArtistPortrait({ imageUrl, joined }: { imageUrl: string; joined: boolean }) {
+  const areaRef = useRef<HTMLDivElement>(null);
+  const portraitRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const posRef = useRef({ x: 0, y: 0 });
+  const velocity = useRef({ x: 1.25, y: 0.9 });
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    const resetPosition = () => {
+      const area = areaRef.current?.getBoundingClientRect();
+      const portrait = portraitRef.current?.getBoundingClientRect();
+      if (!area || !portrait) return;
+      const next = {
+        x: Math.max(0, (area.width - portrait.width) / 2),
+        y: Math.max(0, joined ? area.height * 0.28 : area.height * 0.1),
+      };
+      posRef.current = next;
+      setPos(next);
+    };
+
+    resetPosition();
+    window.addEventListener("resize", resetPosition);
+
+    if (reducedMotion.matches) {
+      return () => window.removeEventListener("resize", resetPosition);
+    }
+
+    let raf = 0;
+    const tick = () => {
+      const area = areaRef.current?.getBoundingClientRect();
+      const portrait = portraitRef.current?.getBoundingClientRect();
+      if (area && portrait) {
+        let nextX = posRef.current.x + velocity.current.x;
+        let nextY = posRef.current.y + velocity.current.y;
+        const maxX = Math.max(0, area.width - portrait.width);
+        const maxY = Math.max(0, area.height - portrait.height);
+
+        if (nextX <= 0 || nextX >= maxX) {
+          velocity.current.x *= -1;
+          nextX = Math.max(0, Math.min(maxX, nextX));
+        }
+
+        if (nextY <= 0 || nextY >= maxY) {
+          velocity.current.y *= -1;
+          nextY = Math.max(0, Math.min(maxY, nextY));
+        }
+
+        const next = { x: nextX, y: nextY };
+        posRef.current = next;
+        setPos(next);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      window.removeEventListener("resize", resetPosition);
+      cancelAnimationFrame(raf);
+    };
+  }, [joined]);
+
+  return (
+    <div
+      ref={areaRef}
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top: joined ? "10.2rem" : "9rem",
+        bottom: joined ? "5.8rem" : "16rem",
+        zIndex: 2,
+        pointerEvents: "none",
+        overflow: "hidden",
+      }}
+    >
+      <div ref={portraitRef} style={{ position: "absolute", left: pos.x, top: pos.y }}>
+        <ArtistPortrait imageUrl={imageUrl} />
+      </div>
     </div>
   );
 }
@@ -451,10 +566,8 @@ function LiveEventView({ title, artistUrl, audioUrl, liveTarget, eventId, messag
       <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
         <LiveAudioHeader title={title} audioUrl={audioUrl} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
-        <LiveMessageStream messages={messages} joined={Boolean(joinedName)} />
-        <div style={{ position: "absolute", left: "50%", top: joinedName ? "31%" : "19%", transform: "translateX(-50%)", zIndex: 2 }}>
-          <ArtistPortrait imageUrl={artistUrl} />
-        </div>
+        <LiveMessageStream messages={messages} joined={Boolean(joinedName)} eventId={eventId} />
+        <BouncingArtistPortrait imageUrl={artistUrl} joined={Boolean(joinedName)} />
         <div style={{ position: "absolute", left: 0, right: 0, top: "7.5rem", display: "flex", justifyContent: "space-between", pointerEvents: "none" }}>
           <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.08)", fontSize: "1.25rem", letterSpacing: "0.18em" }}>live ends</p>
           <span style={{ opacity: 0.12 }}><Countdown target={liveTarget} mode="remaining" /></span>
@@ -487,14 +600,14 @@ function LiveAudioHeader({ title, audioUrl }: { title: string; audioUrl: string 
   );
 }
 
-function LiveMessageStream({ messages, joined }: { messages: ChatMessage[]; joined: boolean }) {
+function LiveMessageStream({ messages, joined, eventId }: { messages: ChatMessage[]; joined: boolean; eventId: string }) {
   return (
     <section style={{
       position: "absolute",
       left: 0,
       right: 0,
       top: joined ? "6.2rem" : "8.1rem",
-      bottom: joined ? "5rem" : "17rem",
+      bottom: joined ? "5.75rem" : "17rem",
       overflowY: "auto",
       display: "flex",
       flexDirection: "column",
@@ -509,19 +622,43 @@ function LiveMessageStream({ messages, joined }: { messages: ChatMessage[]; join
       )}
       {messages.map(message => (
         <div key={message.id} style={{
-          maxWidth: "88%",
+          maxWidth: joined ? "min(88%, 620px)" : "88%",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: joined ? "0.55rem" : 0,
           borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
-          padding: "0.25rem 0 0.25rem 0.65rem",
+          padding: joined ? "0.45rem 0 0.45rem 0.65rem" : "0.25rem 0 0.25rem 0.65rem",
           background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
           order: message.is_pinned ? -1 : 0,
         }}>
-          <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em" }}>
-            {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
-          </p>
-          <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
+          {joined && <ChatAvatar eventId={eventId} name={message.display_name} />}
+          <div style={{ minWidth: 0 }}>
+            <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em" }}>
+              {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
+            </p>
+            <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
+          </div>
         </div>
       ))}
     </section>
+  );
+}
+
+function ChatAvatar({ eventId, name }: { eventId: string; name: string }) {
+  return (
+    <img
+      src={createRetroAvatar(eventId, name)}
+      alt=""
+      aria-hidden="true"
+      style={{
+        width: 28,
+        height: 28,
+        objectFit: "cover",
+        imageRendering: "pixelated",
+        flexShrink: 0,
+        opacity: 0.9,
+      }}
+    />
   );
 }
 
@@ -622,16 +759,18 @@ function ActiveChatComposer({ eventId, displayName, live, starting }: { eventId:
     }
   }
 
+  const canSend = live && !sending && !pendingSubmission && Boolean(body.trim());
+
   return (
-    <div style={{ position: "fixed", left: "1.75rem", right: "1.75rem", bottom: "max(1.2rem, env(safe-area-inset-bottom))", zIndex: 20 }}>
+    <div style={{ position: "fixed", left: "clamp(0.85rem, 4vw, 1.75rem)", right: "clamp(0.85rem, 4vw, 1.75rem)", bottom: "max(1.2rem, env(safe-area-inset-bottom))", zIndex: 20 }}>
       {live ? (
         <form onSubmit={submitMessage} style={{ display: "grid", gap: "0.5rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", borderTop: "1px solid rgba(0,255,65,0.1)", paddingTop: "0.7rem" }}>
-            <span style={{ width: 26, height: 14, background: "repeating-linear-gradient(0deg, rgba(255,255,255,0.35), rgba(255,255,255,0.35) 2px, transparent 2px, transparent 4px)" }} />
-            <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.05rem", letterSpacing: "0.06em" }}>{displayName}</span>
+            <ChatAvatar eventId={eventId} name={displayName} />
+            <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.05rem", letterSpacing: "0.06em", maxWidth: "min(26vw, 140px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{displayName}</span>
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
             <input value={body} onChange={event => setBody(event.target.value)} disabled={Boolean(pendingSubmission)} maxLength={500} aria-label="Message" style={{ ...terminalInputStyle, fontSize: "1.05rem" }} />
-            <button disabled={sending || Boolean(pendingSubmission) || !body.trim()} style={{ ...enterButtonStyle, width: "auto", padding: "0.35rem 0.7rem", fontSize: "1rem", letterSpacing: "0.12em" }}>send</button>
+            <button disabled={!canSend} style={sendButtonStyle(canSend)}>send</button>
           </div>
           {pendingSubmission && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>Waiting...</p>}
           {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem" }}>{error}</p>}
@@ -656,6 +795,22 @@ const enterButtonStyle: React.CSSProperties = {
   fontSize: "1.2rem",
   letterSpacing: "0.25em",
 };
+
+function sendButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    width: "auto",
+    flexShrink: 0,
+    padding: "0.35rem 0.75rem",
+    fontFamily: VT,
+    fontSize: "1rem",
+    letterSpacing: "0.12em",
+    border: "none",
+    color: active ? BG : "rgba(255,255,255,0.28)",
+    background: active ? GREEN : "rgba(255,255,255,0.06)",
+    boxShadow: active ? "0 0 14px rgba(0,255,65,0.32)" : "none",
+    opacity: active ? 1 : 0.85,
+  };
+}
 
 const terminalInputStyle: React.CSSProperties = {
   flex: 1,
