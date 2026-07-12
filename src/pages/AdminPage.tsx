@@ -4,7 +4,7 @@ import { dateTimeLocalToUtc, formatDateTimeLocal } from "@/lib/datetime";
 import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
 import { deleteChatMessage, sendAdminMessage, setMessageStatus, updateMessageFlags } from "@/services/chatService";
-import { createEvent, endEvent, getAdminEvents, scheduleEvent, startEvent, updateEvent } from "@/services/eventService";
+import { createEvent, endEvent, getAdminEvents, startEvent, updateEvent } from "@/services/eventService";
 import { getPublicImageUrl, getSignedAudioUrl, uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage } from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
 import type { MusicEvent, UpdateEventInput } from "@/types/event";
@@ -245,23 +245,15 @@ export default function AdminPage() {
     await runAction("Draft saved.", async (baseEvent, updates) => updateEvent(baseEvent.id, { ...updates, status: "draft" }));
   }
 
-  async function handleSchedule() {
-    if (!hasRequiredMedia) {
-      setError("Upload audio and artwork or an artist image before scheduling.");
-      return;
-    }
-    await runAction(
-      `Event scheduled from ${formatAdminDateTime(form.starts_at)} to ${formatAdminDateTime(form.ends_at)}.`,
-      async (baseEvent, updates) => scheduleEvent(baseEvent.id, updates),
-    );
-  }
-
-  async function handleStartNow() {
+  async function handleStartEvent() {
     if (!hasRequiredMedia) {
       setError("Upload audio and artwork or an artist image before starting.");
       return;
     }
-    await runAction("Event started.", async (baseEvent, updates) => startEvent(baseEvent.id, updates));
+    await runAction(
+      `Event started from ${formatAdminDateTime(form.starts_at)} to ${formatAdminDateTime(form.ends_at)}.`,
+      async (baseEvent, updates) => startEvent(baseEvent.id, updates),
+    );
   }
 
   async function handleEndNow() {
@@ -320,10 +312,9 @@ export default function AdminPage() {
       {activeTab === "event" ? (
         <form onSubmit={handleSaveDraft} style={{ padding: 24, maxWidth: 680, display: "flex", flexDirection: "column", gap: 20 }}>
           <Panel title="Event Controls">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
               <button disabled={disabled} type="submit" style={buttonStyle("#374151")}>Save Draft</button>
-              <button disabled={disabled} type="button" onClick={handleSchedule} style={buttonStyle("#0f766e")}>Schedule Event</button>
-              <button disabled={disabled} type="button" onClick={handleStartNow} style={buttonStyle("#6366f1")}>Start Now</button>
+              <button disabled={disabled} type="button" onClick={handleStartEvent} style={buttonStyle("#6366f1")}>Start Event</button>
               <button disabled={disabled || !event} type="button" onClick={handleEndNow} style={buttonStyle("#ef4444")}>End Now</button>
             </div>
             {uploadStatus && <p style={noteStyle}>{uploadStatus}</p>}

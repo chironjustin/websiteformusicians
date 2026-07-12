@@ -27,14 +27,6 @@ function countdownTarget(event, state) {
   return null;
 }
 
-function shiftWindowToNow(startsAt, endsAt, now) {
-  const originalLength = new Date(endsAt).getTime() - new Date(startsAt).getTime();
-  return {
-    starts_at: now.toISOString(),
-    ends_at: new Date(now.getTime() + originalLength).toISOString(),
-  };
-}
-
 const now = new Date("2026-07-11T14:34:00.000Z");
 const startsAt = new Date(now.getTime() + 2 * 60 * 1000).toISOString();
 const endsAt = "2026-07-11T20:36:00.000Z";
@@ -50,15 +42,21 @@ assert(scheduled.ends_at === "2026-07-11T20:36:00.000Z", "Scheduled ends_at must
 assert(effectiveState(scheduled, now) === "upcoming", "Future scheduled event must display as upcoming.");
 assert(effectiveState({ ...scheduled, status: "live" }, now) === "upcoming", "Future starts_at must keep the public page upcoming even if status is stale.");
 
-const startNow = {
+const startedFutureEvent = { ...scheduled, status: "upcoming" };
+
+assert(startedFutureEvent.starts_at === startsAt, "Start Event must preserve a future start timestamp.");
+assert(startedFutureEvent.ends_at === endsAt, "Start Event must preserve the configured end timestamp.");
+assert(effectiveState(startedFutureEvent, now) === "upcoming", "Start Event with a future start should publish the Upcoming page.");
+
+const startedActiveEvent = {
+  ...scheduled,
   status: "live",
-  ...shiftWindowToNow(scheduled.starts_at, scheduled.ends_at, now),
-  duration_hours: 12,
+  starts_at: "2026-07-11T14:16:00.000Z",
+  ends_at: "2026-07-11T18:33:00.000Z",
 };
 
-assert(startNow.starts_at === "2026-07-11T14:34:00.000Z", "Start Now must use the current timestamp.");
-assert(startNow.ends_at === "2026-07-11T20:34:00.000Z", "Start Now ends_at must preserve the original explicit event length.");
-assert(remainingMilliseconds(countdownTarget(startNow, "live"), now) === 21_600_000, "Live timer must target explicit ends_at.");
+assert(effectiveState(startedActiveEvent, now) === "live", "Start Event should publish Live immediately when the start time has already been reached.");
+assert(remainingMilliseconds(countdownTarget(startedActiveEvent, "live"), now) === 14_340_000, "Live timer must target explicit ends_at.");
 
 assert(effectiveState({ ...scheduled, starts_at: "2026-07-11T14:33:00.000Z", ends_at: "2026-07-12T02:33:00.000Z" }, now) === "live", "Upcoming event past starts_at should display as live while waiting for cron.");
 assert(effectiveState({ ...scheduled, status: "live", starts_at: "2026-07-11T08:33:00.000Z", ends_at: "2026-07-11T14:33:00.000Z" }, now) === "finished", "Live event past ends_at should display as finished.");
@@ -79,8 +77,13 @@ assert(eventTiming.includes("return event.ends_at;"), "Live countdown target mus
 assert(!eventTiming.includes("event.starts_at ? addHoursUtc(event.starts_at, event.duration_hours)"), "Public live countdown must not derive ends_at from duration.");
 
 const eventService = readFileSync("src/services/eventService.ts", "utf8");
-assert(eventService.includes("shiftWindowToNow"), "Start Now must shift the explicit event window to now.");
+assert(!eventService.includes("shiftWindowToNow"), "Start Event must not shift the explicit event window to now.");
+assert(!eventService.includes("scheduleEvent"), "Separate Schedule Event workflow must be removed.");
 assert(!eventService.includes("calculateEndsAt"), "Event service must not recalculate ends_at from duration.");
+
+const adminPage = readFileSync("src/pages/AdminPage.tsx", "utf8");
+assert(adminPage.includes(">Start Event<"), "Admin must expose a single Start Event action.");
+assert(!adminPage.includes(">Schedule Event<") && !adminPage.includes(">Start Now<"), "Admin must not expose Schedule Event or Start Now actions.");
 
 const migrationSql = readFileSync("supabase/event-end-times-migration.sql", "utf8");
 assert(migrationSql.includes("duration_hours::double precision * interval '1 hour'"), "Migration must backfill ends_at from fractional duration hours.");

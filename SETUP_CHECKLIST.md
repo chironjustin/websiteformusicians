@@ -34,7 +34,7 @@
 - [ ] Upload artwork or artist image.
 - [ ] Upload audio.
 - [ ] Select local Event Start Date and Time and Event End Date and Time values and confirm both still display the same local times after save/refresh.
-- [ ] Schedule or start the event.
+- [ ] Press `Start Event`.
 - [ ] Confirm `/` updates without a redeploy.
 - [ ] Submit a visitor chat message on `/` during a live event.
 - [ ] Confirm the message appears as pending in `/admin`.

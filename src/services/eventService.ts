@@ -29,21 +29,6 @@ function validateEventWindow(startsAt: string | null | undefined, endsAt: string
   if (endTime <= startTime) throw new Error("Event End Date and Time must be later than Event Start Date and Time.");
 }
 
-function shiftWindowToNow(startsAt: string, endsAt: string) {
-  const startTime = new Date(startsAt).getTime();
-  const endTime = new Date(endsAt).getTime();
-  const originalLength = endTime - startTime;
-  if (!Number.isFinite(originalLength) || originalLength <= 0) {
-    throw new Error("Event End Date and Time must be later than Event Start Date and Time.");
-  }
-
-  const now = new Date();
-  return {
-    starts_at: now.toISOString(),
-    ends_at: new Date(now.getTime() + originalLength).toISOString(),
-  };
-}
-
 async function requireUserId() {
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) throw new Error("You must be signed in to manage events.");
@@ -107,20 +92,22 @@ export async function startEvent(id: string, latest?: UpdateEventInput) {
 
   const candidate = { ...existing, ...latest };
   validateStartable(candidate);
-  const shifted = shiftWindowToNow(candidate.starts_at!, candidate.ends_at!);
+  const startsAt = new Date(candidate.starts_at!).getTime();
+  const endsAt = new Date(candidate.ends_at!).getTime();
+  const now = Date.now();
 
-  return updateEvent(id, { ...latest, status: "live", ...shifted });
+  if (now >= endsAt) {
+    throw new Error("Event End Date and Time has already passed. Choose a future end time before starting.");
+  }
+
+  return updateEvent(id, {
+    ...latest,
+    status: now >= startsAt ? "live" : "upcoming",
+  });
 }
 
 export async function endEvent(id: string) {
   return updateEvent(id, { status: "finished", ends_at: new Date().toISOString() });
-}
-
-export async function scheduleEvent(id: string, input: UpdateEventInput) {
-  if (!input.starts_at) throw new Error("Choose a future start date and time.");
-  if (new Date(input.starts_at).getTime() <= Date.now()) throw new Error("Scheduled start time must be in the future.");
-  validateStartable(input);
-  return updateEvent(id, { ...input, status: "upcoming" });
 }
 
 export async function deleteEvent(id: string) {

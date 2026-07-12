@@ -9,7 +9,7 @@
 - `react-router` is installed, but no router APIs are currently used. Because client-side routes are required for `/`, `/admin`, and `/login`, the Vercel SPA rewrite will be needed.
 - Event information is stored only in local React state inside `App`. The initial event is hardcoded with title `Gravity`, empty file URLs, a start time three minutes in the future, and a twelve-hour duration.
 - Mock/hardcoded behavior is used for event state, messages, uploads, and admin controls.
-- `Start Now` and `End Now` currently mutate local `startTime` only. They do not persist anything and do not call a backend or trigger a Vercel redeploy.
+- The original prototype's start/end buttons mutated local state only. The production admin now uses `Start Event` to publish the timestamp-driven flow and `End Now` to finish it.
 - File selectors currently create temporary `blob:` preview URLs with `URL.createObjectURL`. No file is uploaded or persisted.
 - Existing field coverage includes song title, start datetime, duration, audio, artwork, artist image, support URL, merchandise URL, event URL, and merchandise image.
 - React and React DOM are currently listed as optional peer dependencies rather than normal dependencies. That must be corrected for production installs.
@@ -57,6 +57,7 @@
 - `starts_at` is the timestamp when an event becomes live.
 - `ends_at` is the authoritative Event End Date and Time, and it is edited directly in the admin form.
 - `duration_hours` remains only as a legacy compatibility column for older deployments; `supabase/event-end-times-migration.sql` backfills `ends_at` once from `starts_at + duration_hours`.
+- `Start Event` does not rewrite timestamps. It sets the event to `upcoming` when the configured start is still in the future, or `live` when the configured start has already been reached and the end is still in the future.
 - Upcoming public countdowns target `starts_at`.
 - Live public countdowns target `ends_at`.
 - `supabase/event-status-cron.sql` creates `public.update_scheduled_event_statuses()` and schedules the `update-event-statuses` Supabase Cron job to run every minute.

@@ -1,6 +1,6 @@
 # Music Event Website
 
-A Vite + React + TypeScript app for musicians to tease unreleased music. The public page reads the current event dynamically from Supabase, while the protected admin dashboard manages drafts, scheduling, manual start/end actions, uploads, support links, and moderated live chat.
+A Vite + React + TypeScript app for musicians to tease unreleased music. The public page reads the current event dynamically from Supabase, while the protected admin dashboard manages drafts, event activation, manual ending, uploads, support links, and moderated live chat.
 
 ## Local Setup
 
@@ -59,7 +59,7 @@ The private `audio` bucket is not publicly readable. Authenticated event owners 
 
 Event timestamps are stored as UTC `timestamptz` values. The admin editor converts them to local browser time for `datetime-local` inputs and converts local input back to UTC when saving.
 
-Scheduled events use Supabase Cron as the authoritative status scheduler. The selected `starts_at` timestamp controls when an event becomes `live`; the explicit `ends_at` timestamp controls when it becomes `finished`. The legacy `duration_hours` column may remain for compatibility, but new scheduling edits `starts_at` and `ends_at` directly. The cron job in `supabase/event-status-cron.sql` runs every minute and Realtime delivers those database changes to open public/admin clients.
+Pressing `Start Event` publishes the timestamp-driven event flow. If `starts_at` is still in the future, the public page appears as Upcoming and counts down to that timestamp. If `starts_at <= now < ends_at`, it appears as Live. The selected `starts_at` timestamp controls when an event becomes `live`; the explicit `ends_at` timestamp controls when it becomes `finished`. The legacy `duration_hours` column may remain for compatibility, but new event edits use `starts_at` and `ends_at` directly. The cron job in `supabase/event-status-cron.sql` runs every minute and Realtime delivers those database changes to open public/admin clients.
 
 ## Moderated Chat
 
