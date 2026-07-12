@@ -2,7 +2,7 @@ export type ChatMessageStatus = "pending" | "approved" | "rejected";
 
 export interface ChatMessage {
   id: string;
-  event_id: string;
+  event_id: string | null;
   user_id: string | null;
   display_name: string;
   body: string;
@@ -12,6 +12,8 @@ export interface ChatMessage {
   is_pinned: boolean;
   is_highlighted: boolean;
   is_liked: boolean;
+  legacy_assignment_confirmed_at: string | null;
+  legacy_assignment_confirmed_by: string | null;
   created_at: string;
   updated_at: string;
 }

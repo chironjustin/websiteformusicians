@@ -18,6 +18,10 @@ function assertDisplayName(displayName: string) {
   if (displayName.length > MAX_DISPLAY_NAME) throw new Error("Display name is too long.");
 }
 
+function assertEventId(eventId: string | null | undefined) {
+  if (!eventId) throw new Error("A current event is required before sending chat messages.");
+}
+
 function orderedMessagesQuery() {
   return supabase
     .from("chat_messages")
@@ -46,6 +50,7 @@ export async function getAdminChatMessages(eventId: string) {
 }
 
 export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
+  assertEventId(input.event_id);
   const displayName = cleanText(input.display_name, MAX_DISPLAY_NAME);
   const body = cleanText(input.body, MAX_BODY);
   assertDisplayName(displayName);
@@ -83,6 +88,7 @@ export async function getVisitorMessageStatus(eventId: string, messageId: string
 }
 
 export async function sendAdminMessage(input: CreateAdminChatMessageInput) {
+  assertEventId(input.event_id);
   const displayName = cleanText(input.display_name || "Admin", MAX_DISPLAY_NAME);
   const body = cleanText(input.body, MAX_BODY);
   assertDisplayName(displayName);
@@ -137,4 +143,33 @@ export async function updateMessageFlags(id: string, flags: Partial<Pick<ChatMes
 export async function deleteChatMessage(id: string) {
   const { error } = await supabase.from("chat_messages").delete().eq("id", id);
   if (error) throw new Error(error.message);
+}
+
+export async function getUnassignedLegacyChatMessages() {
+  const { data, error } = await orderedMessagesQuery()
+    .is("event_id", null)
+    .returns<ChatMessage[]>();
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function assignChatMessageToEvent(messageId: string, eventId: string) {
+  assertEventId(eventId);
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) throw new Error("You must be signed in to assign legacy messages.");
+
+  const { data, error } = await supabase
+    .from("chat_messages")
+    .update({
+      event_id: eventId,
+      legacy_assignment_confirmed_at: new Date().toISOString(),
+      legacy_assignment_confirmed_by: userData.user.id,
+    })
+    .eq("id", messageId)
+    .select("*")
+    .single<ChatMessage>();
+
+  if (error) throw new Error(error.message);
+  return data;
 }

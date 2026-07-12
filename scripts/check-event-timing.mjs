@@ -97,8 +97,9 @@ assert(chatService.includes('.eq("event_id", eventId)') && chatService.includes(
 assert(chatService.includes("client_token: input.client_token") && chatService.includes("get_visitor_chat_message_status"), "Visitor submissions must carry a client token and status lookup must use the scoped RPC.");
 
 const chatSchema = readFileSync("supabase/chat-schema.sql", "utf8");
-assert(chatSchema.includes("event_id uuid not null") && chatSchema.includes("client_token uuid"), "Chat schema must associate messages with events and pending-status client tokens.");
+assert(chatSchema.includes("event_id uuid references public.events") && chatSchema.includes("client_token uuid"), "Chat schema must associate messages with events and pending-status client tokens.");
 assert(chatSchema.includes("chat_messages_event_status_created_idx") && chatSchema.includes("chat_messages_event_client_token_idx"), "Chat schema must include event-scoped retrieval indexes.");
+assert(chatSchema.includes("Authenticated admins can read unassigned legacy chat messages"), "Chat schema must allow legacy unassigned messages to be reviewed separately.");
 
 const eventTiming = readFileSync("src/lib/eventTiming.ts", "utf8");
 assert(eventTiming.includes("return event.ends_at;"), "Live countdown target must use explicit ends_at.");
@@ -112,6 +113,7 @@ assert(!eventService.includes("calculateEndsAt"), "Event service must not recalc
 const adminPage = readFileSync("src/pages/AdminPage.tsx", "utf8");
 assert(adminPage.includes(">Start Event<"), "Admin must expose a single Start Event action.");
 assert(!adminPage.includes(">Schedule Event<") && !adminPage.includes(">Start Now<"), "Admin must not expose Schedule Event or Start Now actions.");
+assert(adminPage.includes("Unassigned Legacy Messages") && adminPage.includes("getTrustedEventMessages"), "Admin archive must separate trusted event messages from legacy messages.");
 
 const migrationSql = readFileSync("supabase/event-end-times-migration.sql", "utf8");
 assert(migrationSql.includes("duration_hours::double precision * interval '1 hour'"), "Migration must backfill ends_at from fractional duration hours.");

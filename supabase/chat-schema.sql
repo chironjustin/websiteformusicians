@@ -3,7 +3,7 @@
 
 create table if not exists public.chat_messages (
   id uuid primary key default gen_random_uuid(),
-  event_id uuid not null references public.events(id) on delete cascade,
+  event_id uuid references public.events(id) on delete cascade,
   user_id uuid references auth.users(id) on delete set null,
   display_name text not null,
   body text not null,
@@ -13,6 +13,8 @@ create table if not exists public.chat_messages (
   is_pinned boolean not null default false,
   is_highlighted boolean not null default false,
   is_liked boolean not null default false,
+  legacy_assignment_confirmed_at timestamptz,
+  legacy_assignment_confirmed_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint chat_messages_status_check check (status in ('pending', 'approved', 'rejected')),
@@ -23,6 +25,7 @@ create table if not exists public.chat_messages (
 create index if not exists chat_messages_event_status_created_idx on public.chat_messages(event_id, status, created_at);
 create index if not exists chat_messages_event_pinned_created_idx on public.chat_messages(event_id, is_pinned desc, created_at);
 create index if not exists chat_messages_event_client_token_idx on public.chat_messages(event_id, client_token) where client_token is not null;
+create index if not exists chat_messages_created_at_idx on public.chat_messages(created_at);
 
 drop trigger if exists set_chat_messages_updated_at on public.chat_messages;
 create trigger set_chat_messages_updated_at
@@ -98,6 +101,13 @@ using (
   )
 );
 
+drop policy if exists "Authenticated admins can read unassigned legacy chat messages" on public.chat_messages;
+create policy "Authenticated admins can read unassigned legacy chat messages"
+on public.chat_messages
+for select
+to authenticated
+using (event_id is null);
+
 drop policy if exists "Owners can insert admin chat messages" on public.chat_messages;
 create policy "Owners can insert admin chat messages"
 on public.chat_messages
@@ -126,6 +136,20 @@ using (
       and events.owner_id = auth.uid()
   )
 )
+with check (
+  exists (
+    select 1 from public.events
+    where events.id = chat_messages.event_id
+      and events.owner_id = auth.uid()
+  )
+);
+
+drop policy if exists "Authenticated admins can assign unassigned legacy chat messages" on public.chat_messages;
+create policy "Authenticated admins can assign unassigned legacy chat messages"
+on public.chat_messages
+for update
+to authenticated
+using (event_id is null)
 with check (
   exists (
     select 1 from public.events
