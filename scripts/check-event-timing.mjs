@@ -18,9 +18,10 @@ function effectiveState(event, now) {
   const startsAt = event.starts_at ? new Date(event.starts_at).getTime() : null;
   const endsAt = event.ends_at ? new Date(event.ends_at).getTime() : null;
   const nowTime = now.getTime();
-  if (event.status === "finished" || (endsAt !== null && nowTime >= endsAt)) return "finished";
-  if (event.status === "live") return "live";
-  if (event.status === "upcoming" && startsAt !== null && nowTime >= startsAt && (endsAt === null || nowTime < endsAt)) return "live";
+  if (event.status === "finished") return "finished";
+  if (startsAt !== null && nowTime < startsAt) return "upcoming";
+  if (endsAt !== null && nowTime >= endsAt) return "finished";
+  if (event.status === "live" || (startsAt !== null && nowTime >= startsAt && (endsAt === null || nowTime < endsAt))) return "live";
   return "upcoming";
 }
 
@@ -41,6 +42,8 @@ const scheduled = {
 
 assert(remainingMilliseconds(countdownTarget(scheduled, "upcoming"), now) === 120_000, "Upcoming timer must target starts_at, not duration.");
 assert(scheduled.ends_at === "2026-07-12T02:36:00.000Z", "Scheduled ends_at must equal starts_at + 12 hours.");
+assert(effectiveState(scheduled, now) === "upcoming", "Future scheduled event must display as upcoming.");
+assert(effectiveState({ ...scheduled, status: "live" }, now) === "upcoming", "Future starts_at must keep the public page upcoming even if status is stale.");
 
 const startNow = {
   status: "live",
@@ -54,7 +57,7 @@ assert(startNow.ends_at === "2026-07-12T02:34:00.000Z", "Start Now ends_at must 
 assert(remainingMilliseconds(countdownTarget(startNow, "live"), now) === 43_200_000, "Live timer must target ends_at.");
 
 assert(effectiveState({ ...scheduled, starts_at: "2026-07-11T14:33:00.000Z", ends_at: "2026-07-12T02:33:00.000Z" }, now) === "live", "Upcoming event past starts_at should display as live while waiting for cron.");
-assert(effectiveState({ ...scheduled, status: "live", ends_at: "2026-07-11T14:33:00.000Z" }, now) === "finished", "Live event past ends_at should display as finished.");
+assert(effectiveState({ ...scheduled, status: "live", starts_at: "2026-07-11T08:33:00.000Z", ends_at: "2026-07-11T14:33:00.000Z" }, now) === "finished", "Live event past ends_at should display as finished.");
 
 const localSelected = new Date("2026-07-11T16:36");
 assert(localSelected.toISOString() === "2026-07-11T14:36:00.000Z", "Local 16:36 Europe/Berlin should store as 14:36 UTC.");
@@ -63,6 +66,8 @@ assert(localSelected.getHours() === 16 && localSelected.getMinutes() === 36, "St
 const publicPage = readFileSync("src/pages/PublicEventPage.tsx", "utf8");
 assert(publicPage.includes('if (state !== "live")'), "Public page must not request audio while upcoming.");
 assert(publicPage.includes("{audioUrl && ("), "Live audio player should render only when a signed URL exists.");
+assert(publicPage.includes('useEventChat(state === "live" ? event?.id : undefined'), "Public chat subscription must only initialize while live.");
+assert(publicPage.includes('{state === "live" && (') && publicPage.includes("<ChatDrawer"), "Public chat drawer must only render while live.");
 assert(publicPage.includes('live={authoritativeState === "live"}'), "Public chat submission must depend on authoritative database live status.");
 
 const cronSql = readFileSync("supabase/event-status-cron.sql", "utf8");

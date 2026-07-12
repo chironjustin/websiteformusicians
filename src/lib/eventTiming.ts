@@ -7,15 +7,19 @@ export function getEventDisplayState(event: MusicEvent, now = new Date()): Event
   const endsAt = event.ends_at ? new Date(event.ends_at).getTime() : null;
   const nowTime = now.getTime();
 
-  if (event.status === "finished" || (endsAt !== null && nowTime >= endsAt)) {
+  if (event.status === "finished") {
     return "finished";
   }
 
-  if (event.status === "live") {
-    return "live";
+  if (startsAt !== null && nowTime < startsAt) {
+    return "upcoming";
   }
 
-  if (event.status === "upcoming" && startsAt !== null && nowTime >= startsAt && (endsAt === null || nowTime < endsAt)) {
+  if (endsAt !== null && nowTime >= endsAt) {
+    return "finished";
+  }
+
+  if (event.status === "live" || (startsAt !== null && nowTime >= startsAt && (endsAt === null || nowTime < endsAt))) {
     return "live";
   }
 

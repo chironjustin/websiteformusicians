@@ -281,18 +281,20 @@ function StatusPanel({ state, chatOpen, onToggleChat }: { state: DisplayState; c
           {state === item ? "› " : "  "}{item}
         </span>
       ))}
-      <button onClick={onToggleChat} style={{
-        fontFamily: VT,
-        fontSize: "0.85rem",
-        color: chatOpen ? BG : GREEN,
-        background: chatOpen ? GREEN : "transparent",
-        border: "none",
-        padding: "2px 8px",
-        textAlign: "left",
-        letterSpacing: "0.1em",
-      }}>
-        {chatOpen ? "› " : "  "}chat
-      </button>
+      {state === "live" && (
+        <button onClick={onToggleChat} style={{
+          fontFamily: VT,
+          fontSize: "0.85rem",
+          color: chatOpen ? BG : GREEN,
+          background: chatOpen ? GREEN : "transparent",
+          border: "none",
+          padding: "2px 8px",
+          textAlign: "left",
+          letterSpacing: "0.1em",
+        }}>
+          {chatOpen ? "› " : "  "}chat
+        </button>
+      )}
     </nav>
   );
 }
@@ -313,10 +315,10 @@ export default function PublicEventPage() {
   const [audioUrl, setAudioUrl] = useState("");
   const [now, setNow] = useState(new Date());
   const [chatOpen, setChatOpen] = useState(false);
-  const chat = useEventChat(event?.id, "public");
   const state = event ? getEventDisplayState(event, now) : "upcoming";
   const authoritativeState = event?.status ?? "upcoming";
   const waitingForLiveStatus = state === "live" && authoritativeState === "upcoming";
+  const chat = useEventChat(state === "live" ? event?.id : undefined, "public");
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -377,14 +379,16 @@ export default function PublicEventPage() {
       {state === "upcoming" && <UpcomingPage title={title} artworkUrl={images.artwork} startsAt={countdownTarget} />}
       {state === "live" && <LivePage title={title} artworkUrl={images.artwork} audioUrl={audioUrl} liveTarget={countdownTarget} waitingForLiveStatus={waitingForLiveStatus} />}
       {state === "finished" && <FinishedPage event={event} title={title} merchImage={images.merch} />}
-      <ChatDrawer
-        eventId={event.id}
-        messages={chat.messages}
-        open={chatOpen}
-        live={authoritativeState === "live"}
-        starting={waitingForLiveStatus}
-        onClose={() => setChatOpen(false)}
-      />
+      {state === "live" && (
+        <ChatDrawer
+          eventId={event.id}
+          messages={chat.messages}
+          open={chatOpen}
+          live={authoritativeState === "live"}
+          starting={waitingForLiveStatus}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
     </Shell>
   );
 }
