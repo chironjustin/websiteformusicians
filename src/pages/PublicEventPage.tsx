@@ -754,7 +754,7 @@ function ChatMessageBubble({ message, joined, eventId, artistName, artistUrl, pi
       )}
       <div style={{ minWidth: 0 }}>
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em", overflowWrap: "anywhere" }}>
-          {displayName}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
+          {displayName}{message.is_pinned ? " [pinned]" : ""}
         </p>
         <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
         {message.is_liked && <ArtistLikeIndicator artistUrl={artistUrl} />}
