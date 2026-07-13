@@ -120,8 +120,11 @@ export type DeleteArchivedEventResult = {
   deleted: boolean;
   eventId: string;
   deletedChatMessages: number;
+  collectedStorageRefs: Array<{ bucket: string; column: string; path: string }>;
   removedStorage: Array<{ bucket: string; path: string }>;
-  storageFailures: Array<{ bucket: string; path: string; error: string }>;
+  preservedSharedStorage: Array<{ bucket: string; column: string; path: string }>;
+  invalidStorageRefs: Array<{ bucket: string; column: string; originalValue: string; reason: string }>;
+  storageFailures: Array<{ bucket: string; path: string; column?: string; originalValue?: string; error: string }>;
 };
 
 export async function deleteArchivedEvent(id: string) {

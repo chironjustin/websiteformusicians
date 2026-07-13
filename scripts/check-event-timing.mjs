@@ -120,6 +120,11 @@ assert(!eventService.includes("shiftWindowToNow"), "Start Event must not shift t
 assert(!eventService.includes("scheduleEvent"), "Separate Schedule Event workflow must be removed.");
 assert(!eventService.includes("calculateEndsAt"), "Event service must not recalculate ends_at from duration.");
 
+const deleteArchivedEventFunction = readFileSync("supabase/functions/delete-archived-event/index.ts", "utf8");
+assert(deleteArchivedEventFunction.includes("function normalizeStoragePath") && deleteArchivedEventFunction.includes("new URL(trimmed)"), "Archived event deletion must normalize raw paths and Storage URLs before cleanup.");
+assert(!deleteArchivedEventFunction.includes("function cleanPath"), "Archived event deletion must not discard Storage URLs with the old cleanPath helper.");
+assert(deleteArchivedEventFunction.includes("preservedSharedStorage") && deleteArchivedEventFunction.includes("invalidStorageRefs"), "Archived event deletion must report shared and invalid storage references.");
+
 const adminPage = readFileSync("src/pages/AdminPage.tsx", "utf8");
 assert(adminPage.includes(">Start Event<"), "Admin must expose a single Start Event action.");
 assert(!adminPage.includes(">Schedule Event<") && !adminPage.includes(">Start Now<"), "Admin must not expose Schedule Event or Start Now actions.");

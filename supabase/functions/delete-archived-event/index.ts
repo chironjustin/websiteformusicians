@@ -12,10 +12,34 @@ type EventRow = {
   merch_image_path: string | null;
 };
 
+type Bucket = "audio" | "artwork" | "artist-images" | "merch-images";
+type MediaColumn = keyof Pick<EventRow, "audio_path" | "artwork_path" | "artist_image_path" | "merch_image_path">;
+
 type StorageRef = {
-  bucket: "audio" | "artwork" | "artist-images" | "merch-images";
-  column: keyof Pick<EventRow, "audio_path" | "artwork_path" | "artist_image_path" | "merch_image_path">;
+  bucket: Bucket;
+  column: MediaColumn;
   path: string;
+  originalValue: string;
+};
+
+type InvalidStorageRef = {
+  bucket: Bucket;
+  column: MediaColumn;
+  originalValue: string;
+  reason: string;
+};
+
+type StorageRefCollection = {
+  refs: StorageRef[];
+  invalidRefs: InvalidStorageRef[];
+};
+
+type StorageFailure = {
+  bucket: string;
+  path: string;
+  column?: string;
+  originalValue?: string;
+  error: string;
 };
 
 const corsHeaders = {
@@ -37,25 +61,119 @@ function isArchived(event: EventRow) {
   return new Date(event.ends_at).getTime() <= Date.now();
 }
 
-function cleanPath(path: string | null) {
-  const trimmed = path?.trim() ?? "";
-  if (!trimmed || /^https?:\/\//i.test(trimmed) || trimmed.includes("/storage/v1/object/")) return "";
-  return trimmed.replace(/^\/+/, "");
+function stripQueryForLog(value: string | null | undefined) {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return trimmed;
+  }
 }
 
-function eventStorageRefs(event: EventRow): StorageRef[] {
-  const refs: StorageRef[] = [];
-  const audioPath = cleanPath(event.audio_path);
-  const artworkPath = cleanPath(event.artwork_path);
-  const artistImagePath = cleanPath(event.artist_image_path);
-  const merchImagePath = cleanPath(event.merch_image_path);
+function decodePathname(pathname: string) {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    return pathname;
+  }
+}
 
-  if (audioPath) refs.push({ bucket: "audio", column: "audio_path", path: audioPath });
-  if (artworkPath) refs.push({ bucket: "artwork", column: "artwork_path", path: artworkPath });
-  if (artistImagePath) refs.push({ bucket: "artist-images", column: "artist_image_path", path: artistImagePath });
-  if (merchImagePath) refs.push({ bucket: "merch-images", column: "merch_image_path", path: merchImagePath });
+function normalizePathSegments(path: string) {
+  const segments = path.split("/").filter(Boolean);
+  if (segments.some(segment => segment === "." || segment === "..")) {
+    throw new Error("Storage path cannot contain relative path segments.");
+  }
+  return segments.join("/");
+}
 
-  return refs;
+function normalizeStoragePath(storedValue: string | null, bucket: Bucket) {
+  const trimmed = storedValue?.trim() ?? "";
+  if (!trimmed) return "";
+
+  let candidate = trimmed;
+
+  try {
+    const url = new URL(trimmed);
+    const decodedPath = decodePathname(url.pathname).replace(/^\/+/, "");
+    const storagePrefixMatch = decodedPath.match(/^storage\/v1\/object\/(?:public|sign|authenticated)\/(.+)$/);
+    if (!storagePrefixMatch) {
+      throw new Error("URL is not a Supabase Storage object URL.");
+    }
+    candidate = storagePrefixMatch[1];
+  } catch (error) {
+    if (/^https?:\/\//i.test(trimmed)) {
+      throw error instanceof Error ? error : new Error("Invalid Storage URL.");
+    }
+  }
+
+  candidate = normalizePathSegments(decodePathname(candidate).replace(/^\/+/, ""));
+  if (!candidate) return "";
+
+  const knownBuckets: Bucket[] = ["audio", "artwork", "artist-images", "merch-images"];
+  const firstSegment = candidate.split("/")[0];
+
+  if (firstSegment === bucket) {
+    candidate = candidate.slice(bucket.length).replace(/^\/+/, "");
+  } else if (knownBuckets.includes(firstSegment as Bucket)) {
+    throw new Error(`Storage path points at bucket "${firstSegment}", expected "${bucket}".`);
+  }
+
+  candidate = normalizePathSegments(candidate);
+  if (!candidate) throw new Error("Storage path is empty after bucket normalization.");
+  return candidate;
+}
+
+function collectStorageRef(event: EventRow, column: MediaColumn, bucket: Bucket, collection: StorageRefCollection) {
+  const originalValue = event[column]?.trim() ?? "";
+  if (!originalValue) return;
+
+  try {
+    const path = normalizeStoragePath(originalValue, bucket);
+    if (path) {
+      collection.refs.push({ bucket, column, path, originalValue: stripQueryForLog(originalValue) });
+      return;
+    }
+    collection.invalidRefs.push({ bucket, column, originalValue: stripQueryForLog(originalValue), reason: "Storage path is empty." });
+  } catch (error) {
+    collection.invalidRefs.push({
+      bucket,
+      column,
+      originalValue: stripQueryForLog(originalValue),
+      reason: error instanceof Error ? error.message : "Unable to normalize storage path.",
+    });
+  }
+}
+
+function eventStorageRefs(event: EventRow): StorageRefCollection {
+  const collection: StorageRefCollection = { refs: [], invalidRefs: [] };
+  collectStorageRef(event, "audio_path", "audio", collection);
+  collectStorageRef(event, "artwork_path", "artwork", collection);
+  collectStorageRef(event, "artist_image_path", "artist-images", collection);
+  collectStorageRef(event, "merch_image_path", "merch-images", collection);
+  return collection;
+}
+
+function otherEventReferencesStoragePath(otherEvent: Partial<EventRow>, ref: StorageRef) {
+  const otherValue = otherEvent[ref.column];
+  if (!otherValue) return false;
+  try {
+    return normalizeStoragePath(otherValue, ref.bucket) === ref.path;
+  } catch {
+    return false;
+  }
+}
+
+function originalMediaFields(event: EventRow) {
+  return {
+    audio_path: stripQueryForLog(event.audio_path),
+    artwork_path: stripQueryForLog(event.artwork_path),
+    artist_image_path: stripQueryForLog(event.artist_image_path),
+    merch_image_path: stripQueryForLog(event.merch_image_path),
+  };
 }
 
 async function writeAudit(
@@ -140,7 +258,17 @@ Deno.serve(async request => {
     return json({ error: "Only finished or archived events can be permanently deleted." }, 409);
   }
 
-  const refs = eventStorageRefs(event);
+  const storageCollection = eventStorageRefs(event);
+  const refs = storageCollection.refs;
+  const invalidStorageRefs = storageCollection.invalidRefs;
+
+  console.log("delete-archived-event media refs", {
+    eventId: event.id,
+    originalMediaFields: originalMediaFields(event),
+    normalizedRefs: refs.map(ref => ({ bucket: ref.bucket, column: ref.column, path: ref.path })),
+    invalidStorageRefs,
+  });
+
   const { data: otherEvents, error: otherEventsError } = await adminClient
     .from("events")
     .select("id, audio_path, artwork_path, artist_image_path, merch_image_path")
@@ -152,7 +280,16 @@ Deno.serve(async request => {
     return json({ error: otherEventsError.message }, 500);
   }
 
-  const exclusiveRefs = refs.filter(ref => !(otherEvents ?? []).some(otherEvent => cleanPath(String(otherEvent[ref.column] ?? "")) === ref.path));
+  const exclusiveRefs = refs.filter(ref => !(otherEvents ?? []).some(otherEvent => otherEventReferencesStoragePath(otherEvent, ref)));
+  const preservedSharedStorage = refs
+    .filter(ref => !exclusiveRefs.includes(ref))
+    .map(ref => ({ bucket: ref.bucket, column: ref.column, path: ref.path }));
+
+  console.log("delete-archived-event shared storage check", {
+    eventId: event.id,
+    exclusiveRefs: exclusiveRefs.map(ref => ({ bucket: ref.bucket, column: ref.column, path: ref.path })),
+    preservedSharedStorage,
+  });
 
   const { count: chatCount, error: chatCountError } = await adminClient
     .from("chat_messages")
@@ -174,7 +311,13 @@ Deno.serve(async request => {
     return json({ error: eventDeleteError.message }, 500);
   }
 
-  const storageFailures: Array<{ bucket: string; path: string; error: string }> = [];
+  const storageFailures: StorageFailure[] = invalidStorageRefs.map(ref => ({
+    bucket: ref.bucket,
+    path: "",
+    column: ref.column,
+    originalValue: ref.originalValue,
+    error: ref.reason,
+  }));
   const removedStorage: Array<{ bucket: string; path: string }> = [];
   const grouped = new Map<string, string[]>();
 
@@ -183,34 +326,46 @@ Deno.serve(async request => {
   }
 
   for (const [bucket, paths] of grouped.entries()) {
+    console.log("delete-archived-event storage remove request", { eventId: event.id, bucket, paths });
     const { data, error } = await adminClient.storage.from(bucket).remove(paths);
-    const removedPaths = new Set((data ?? []).map(item => item.name));
+    console.log("delete-archived-event storage remove response", {
+      eventId: event.id,
+      bucket,
+      requestedPaths: paths,
+      removedObjects: data?.map(item => item.name) ?? [],
+      error: error?.message ?? null,
+    });
 
-    for (const path of paths) {
-      if (!error && removedPaths.has(path)) {
+    if (!error) {
+      for (const path of paths) {
         removedStorage.push({ bucket, path });
       }
+      continue;
     }
 
-    if (error) {
-      for (const path of paths) {
-        storageFailures.push({ bucket, path, error: error.message });
-      }
+    for (const path of paths) {
+      storageFailures.push({ bucket, path, error: error.message });
     }
   }
 
   const result = storageFailures.length > 0 ? "partial_success_storage_failed" : "success";
   await writeAudit(adminClient, event, requester.id, result, storageFailures, {
     deleted_chat_messages: chatCount ?? 0,
+    original_media_fields: originalMediaFields(event),
+    collected_storage_refs: refs.map(ref => ({ bucket: ref.bucket, column: ref.column, path: ref.path })),
+    invalid_storage_refs: invalidStorageRefs,
     removed_storage: removedStorage,
-    preserved_shared_storage: refs.filter(ref => !exclusiveRefs.includes(ref)).map(ref => ({ bucket: ref.bucket, path: ref.path })),
+    preserved_shared_storage: preservedSharedStorage,
   });
 
   return json({
     deleted: true,
     eventId: event.id,
     deletedChatMessages: chatCount ?? 0,
+    collectedStorageRefs: refs.map(ref => ({ bucket: ref.bucket, column: ref.column, path: ref.path })),
     removedStorage,
+    preservedSharedStorage,
+    invalidStorageRefs,
     storageFailures,
   });
 });
