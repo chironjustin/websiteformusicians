@@ -513,6 +513,7 @@ export default function PublicEventPage() {
         <LiveEventView
           key={event.id}
           title={title}
+          artistName={event.artist_name || "artist"}
           artistUrl={images.artist}
           audioUrl={audioUrl}
           startsAt={event.starts_at}
@@ -652,7 +653,7 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
   );
 }
 
-function LiveEventView({ title, artistUrl, audioUrl, startsAt, liveTarget, eventId, messages, live, starting }: { title: string; artistUrl: string; audioUrl: string; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
+function LiveEventView({ title, artistName, artistUrl, audioUrl, startsAt, liveTarget, eventId, messages, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
   const joinedNameKey = getEventChatNameKey(eventId);
   const [joinedName, setJoinedName] = useState("");
 
@@ -665,7 +666,7 @@ function LiveEventView({ title, artistUrl, audioUrl, startsAt, liveTarget, event
       <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
         <LiveAudioHeader title={title} audioUrl={audioUrl} startsAt={startsAt} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
-        <LiveMessageStream messages={messages} joined={Boolean(joinedName)} eventId={eventId} artistUrl={artistUrl} />
+        <LiveMessageStream messages={messages} joined={Boolean(joinedName)} eventId={eventId} artistName={artistName} artistUrl={artistUrl} />
         <BouncingArtistPortrait imageUrl={artistUrl} />
         {starting && (
           <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
@@ -696,7 +697,7 @@ function LiveAudioHeader({ title, audioUrl, startsAt, liveTarget }: { title: str
   );
 }
 
-function LiveMessageStream({ messages, joined, eventId, artistUrl }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistUrl: string }) {
+function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistName: string; artistUrl: string }) {
   const pinnedMessage = messages.find(message => message.is_pinned);
   const feedMessages = pinnedMessage ? messages.filter(message => message.id !== pinnedMessage.id) : messages;
 
@@ -716,7 +717,7 @@ function LiveMessageStream({ messages, joined, eventId, artistUrl }: { messages:
     }}>
       {pinnedMessage && (
         <div style={{ width: "min(100%, 620px)" }}>
-          <ChatMessageBubble message={pinnedMessage} joined={joined} eventId={eventId} artistUrl={artistUrl} pinnedArea />
+          <ChatMessageBubble message={pinnedMessage} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} pinnedArea />
         </div>
       )}
       {joined && (
@@ -726,27 +727,34 @@ function LiveMessageStream({ messages, joined, eventId, artistUrl }: { messages:
         </div>
       )}
       {feedMessages.map(message => (
-        <ChatMessageBubble key={message.id} message={message} joined={joined} eventId={eventId} artistUrl={artistUrl} />
+        <ChatMessageBubble key={message.id} message={message} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} />
       ))}
     </section>
   );
 }
 
-function ChatMessageBubble({ message, joined, eventId, artistUrl, pinnedArea = false }: { message: ChatMessage; joined: boolean; eventId: string; artistUrl: string; pinnedArea?: boolean }) {
+function ChatMessageBubble({ message, joined, eventId, artistName, artistUrl, pinnedArea = false }: { message: ChatMessage; joined: boolean; eventId: string; artistName: string; artistUrl: string; pinnedArea?: boolean }) {
+  const displayName = message.is_admin ? artistName : message.display_name;
+  const showAvatar = joined || message.is_admin;
+
   return (
     <div style={{
       maxWidth: pinnedArea ? "100%" : joined ? "min(88%, 620px)" : "88%",
       display: "flex",
       alignItems: "flex-start",
-      gap: joined ? "0.55rem" : 0,
+      gap: showAvatar ? "0.55rem" : 0,
       borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
       padding: joined ? "0.45rem 0 0.45rem 0.65rem" : "0.25rem 0 0.25rem 0.65rem",
       background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
     }}>
-      {joined && <ChatAvatar eventId={eventId} name={message.display_name} />}
+      {showAvatar && (
+        message.is_admin
+          ? <ArtistMessageAvatar artistUrl={artistUrl} />
+          : <ChatAvatar eventId={eventId} name={message.display_name} />
+      )}
       <div style={{ minWidth: 0 }}>
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em", overflowWrap: "anywhere" }}>
-          {message.display_name}{message.is_admin ? " [admin]" : ""}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
+          {displayName}{message.is_pinned ? " [pinned]" : ""}{message.is_liked ? " [liked]" : ""}
         </p>
         <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
         {message.is_liked && <ArtistLikeIndicator artistUrl={artistUrl} />}
@@ -789,6 +797,27 @@ function ChatAvatar({ eventId, name }: { eventId: string; name: string }) {
         height: 28,
         objectFit: "cover",
         imageRendering: "pixelated",
+        flexShrink: 0,
+        opacity: 0.9,
+      }}
+    />
+  );
+}
+
+function ArtistMessageAvatar({ artistUrl }: { artistUrl: string }) {
+  const src = artistUrl.trim() || PLACEHOLDER_SRC;
+
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      style={{
+        width: 28,
+        aspectRatio: "4 / 5",
+        objectFit: "cover",
+        borderRadius: 6,
+        display: "block",
         flexShrink: 0,
         opacity: 0.9,
       }}

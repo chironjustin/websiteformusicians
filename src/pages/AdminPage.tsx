@@ -729,12 +729,12 @@ function ArchivedEventsPanel({ events }: { events: MusicEvent[] }) {
           )}
           {selectedMessages.length > 0 && (
             <>
-              <ArchiveMessageSection title="Approved" messages={selectedMessages.filter(message => message.status === "approved")} />
-              <ArchiveMessageSection title="Pending" messages={selectedMessages.filter(message => message.status === "pending")} />
-              <ArchiveMessageSection title="Rejected" messages={selectedMessages.filter(message => message.status === "rejected")} />
-              <ArchiveMessageSection title="Pinned" messages={selectedMessages.filter(message => message.is_pinned)} />
-              <ArchiveMessageSection title="Highlighted" messages={selectedMessages.filter(message => message.is_highlighted)} />
-              <ArchiveMessageSection title="Admin Published" messages={selectedMessages.filter(message => message.is_admin)} />
+              <ArchiveMessageSection event={selectedEvent} title="Approved" messages={selectedMessages.filter(message => message.status === "approved")} />
+              <ArchiveMessageSection event={selectedEvent} title="Pending" messages={selectedMessages.filter(message => message.status === "pending")} />
+              <ArchiveMessageSection event={selectedEvent} title="Rejected" messages={selectedMessages.filter(message => message.status === "rejected")} />
+              <ArchiveMessageSection event={selectedEvent} title="Pinned" messages={selectedMessages.filter(message => message.is_pinned)} />
+              <ArchiveMessageSection event={selectedEvent} title="Highlighted" messages={selectedMessages.filter(message => message.is_highlighted)} />
+              <ArchiveMessageSection event={selectedEvent} title="Admin Published" messages={selectedMessages.filter(message => message.is_admin)} />
             </>
           )}
         </div>
@@ -819,7 +819,10 @@ function LegacyMessagesPanel({
   );
 }
 
-function ArchiveMessageSection({ title, messages }: { title: string; messages: ChatMessage[] }) {
+function ArchiveMessageSection({ event, title, messages }: { event: MusicEvent; title: string; messages: ChatMessage[] }) {
+  const artistName = event.artist_name || "artist";
+  const artistUrl = getPublicImageUrl("artist-images", event.artist_image_path);
+
   return (
     <Panel title={`${title} (${messages.length})`}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflowY: "auto" }}>
@@ -827,10 +830,10 @@ function ArchiveMessageSection({ title, messages }: { title: string; messages: C
         {messages.map(message => (
           <div key={`${title}-${message.id}`} style={chatMessageStyle(message)}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-              <strong style={{ fontSize: 12 }}>{message.display_name}</strong>
+              {message.is_admin && <ArchiveArtistAvatar artistUrl={artistUrl} />}
+              <strong style={{ fontSize: 12 }}>{message.is_admin ? artistName : message.display_name}</strong>
               <span style={{ fontSize: 11, color: "#6b7280" }}>{formatChatTime(message.created_at)}</span>
               <span style={badgeStyle}>{message.status}</span>
-              {message.is_admin && <span style={badgeStyle}>Admin</span>}
               {message.is_pinned && <span style={badgeStyle}>Pinned</span>}
               {message.is_highlighted && <span style={badgeStyle}>Highlighted</span>}
               {message.legacy_assignment_confirmed_at && <span style={badgeStyle}>Confirmed</span>}
@@ -841,6 +844,26 @@ function ArchiveMessageSection({ title, messages }: { title: string; messages: C
         ))}
       </div>
     </Panel>
+  );
+}
+
+function ArchiveArtistAvatar({ artistUrl }: { artistUrl: string }) {
+  if (!artistUrl) return null;
+
+  return (
+    <img
+      src={artistUrl}
+      alt=""
+      aria-hidden="true"
+      style={{
+        width: 22,
+        aspectRatio: "4 / 5",
+        objectFit: "cover",
+        borderRadius: 5,
+        display: "block",
+        flexShrink: 0,
+      }}
+    />
   );
 }
 
