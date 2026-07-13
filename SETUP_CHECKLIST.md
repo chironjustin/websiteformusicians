@@ -9,6 +9,7 @@
 - [ ] Run `supabase/event-end-times-migration.sql` in the SQL editor to backfill explicit end timestamps for older duration-based events.
 - [ ] Run `supabase/chat-schema.sql` in the SQL editor.
 - [ ] Run `supabase/chat-pending-status.sql` in the SQL editor for pending-message status tracking.
+- [ ] Run `supabase/chat-public-submit-policy.sql` in the SQL editor so public visitors can submit pending chat messages during the live event window.
 - [ ] Run `supabase/archive-delete-audit.sql` in the SQL editor for permanent archived-event deletion audit logs.
 - [ ] Run `supabase/event-status-cron.sql` in the SQL editor.
 - [ ] Confirm Supabase Cron is enabled/available and the `update-event-statuses` job runs every minute.

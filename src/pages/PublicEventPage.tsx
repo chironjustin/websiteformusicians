@@ -316,23 +316,28 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
   const pct = duration > 0 ? (progress / duration) * 100 : 0;
 
   return (
-    <div style={{ width: "100%", minWidth: 0 }}>
+    <div style={{ width: "100%", minWidth: "4.5rem" }}>
       {audioUrl && <audio ref={audioRef} src={audioUrl} loop />}
-      <div style={{ display: "flex", alignItems: "center", gap: "clamp(0.35rem, 1.4vw, 0.75rem)", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "clamp(0.25rem, 1.2vw, 0.7rem)", minWidth: 0 }}>
         <button
           onClick={toggle}
           disabled={!audioUrl}
-          aria-label={playing ? "Pause audio" : "Play audio"}
+          aria-label={playing ? "Pause live audio" : "Resume live audio"}
           style={{
-          fontFamily: VT,
-          fontSize: "clamp(1rem, 3.2vw, 1.35rem)",
-          color: audioUrl ? "#FFFFFF" : "rgba(255,255,255,0.28)",
-          background: "none",
-          border: "none",
-          padding: 0,
-          letterSpacing: "0.08em",
-          flexShrink: 0,
-        }}
+            fontFamily: VT,
+            fontSize: "clamp(0.95rem, 4vw, 1.35rem)",
+            color: audioUrl ? "#FFFFFF" : "rgba(255,255,255,0.28)",
+            background: "none",
+            border: "none",
+            padding: 0,
+            letterSpacing: "0.08em",
+            width: "clamp(1.7rem, 7vw, 2.25rem)",
+            minWidth: "1.7rem",
+            height: "clamp(1.7rem, 7vw, 2.25rem)",
+            display: "grid",
+            placeItems: "center",
+            flex: "0 0 auto",
+          }}
         >
           {playing ? "■" : "▶"}
         </button>
@@ -342,7 +347,7 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
           aria-valuemin={0}
           aria-valuemax={duration || 0}
           aria-valuenow={progress}
-          style={{ minWidth: 24, width: "100%", height: "2px", background: "rgba(0,255,65,0.18)", position: "relative", pointerEvents: "none" }}
+          style={{ minWidth: "2.25rem", flex: "1 1 auto", height: "2px", background: "rgba(0,255,65,0.18)", position: "relative", pointerEvents: "none" }}
         >
           <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${pct}%`, background: GREEN, transition: "width 0.4s linear" }} />
         </div>
@@ -685,12 +690,12 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, startsAt, liveT
 
 function LiveAudioHeader({ title, audioUrl, startsAt, liveTarget }: { title: string; audioUrl: string; startsAt: string | null; liveTarget: string | null }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center", gap: "clamp(0.45rem, 2vw, 1.2rem)", width: "100%", minWidth: 0 }}>
-      <p style={{ fontFamily: VT, fontSize: "clamp(1rem, 3.4vw, 1.85rem)", color: "rgba(255,255,255,0.38)", letterSpacing: "0.04em", minWidth: 0, maxWidth: "clamp(6ch, 22vw, 18ch)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: "clamp(0.25rem, 1.5vw, 1rem)", width: "100%", minWidth: 0, flexWrap: "nowrap", overflow: "hidden" }}>
+      <p style={{ fontFamily: VT, fontSize: "clamp(0.95rem, 3.4vw, 1.85rem)", color: "rgba(255,255,255,0.38)", letterSpacing: "0.04em", minWidth: 0, flex: "0 1 clamp(4.25rem, 24vw, 18ch)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {title}
       </p>
-      <div style={{ minWidth: 0 }}>
-        {audioUrl && <AudioPlayer audioUrl={audioUrl} startsAt={startsAt} />}
+      <div style={{ minWidth: "4.5rem", flex: "1 1 5rem" }}>
+        <AudioPlayer audioUrl={audioUrl} startsAt={startsAt} />
       </div>
       <CompactLiveCountdown target={liveTarget} />
     </div>
@@ -921,7 +926,8 @@ function ActiveChatComposer({ eventId, displayName, live, starting }: { eventId:
       setLastSentAt(sentAt);
       setPendingSubmission({ id: message.id, clientToken });
     } catch (err) {
-      setError(err instanceof Error ? err.message.toLowerCase() : "message failed.");
+      console.error("Visitor chat submission failed", err);
+      setError("message could not be submitted.");
     } finally {
       setSending(false);
     }

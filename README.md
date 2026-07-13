@@ -44,17 +44,18 @@ Vite outputs to `dist`.
 3. In the SQL editor, run `supabase/event-end-times-migration.sql` to backfill explicit event end timestamps for any older duration-based events.
 4. In the SQL editor, run `supabase/chat-schema.sql`.
 5. In the SQL editor, run `supabase/chat-pending-status.sql` for existing projects or after chat setup.
-6. In the SQL editor, run `supabase/event-status-cron.sql`.
-7. Create these Storage buckets:
+6. In the SQL editor, run `supabase/chat-public-submit-policy.sql` so public Live chat submissions are accepted only as pending messages during the live timestamp window.
+7. In the SQL editor, run `supabase/event-status-cron.sql`.
+8. Create these Storage buckets:
    - `artist-images` public
    - `artwork` public
    - `merch-images` public
    - `audio` private
-8. In the SQL editor, run `supabase/storage-policies.sql` after the buckets exist.
-9. Enable email/password Auth.
-10. Create the first admin user in Supabase Auth.
-11. Enable Realtime for `public.events` and optionally `public.chat_messages`.
-12. Add the same `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` values locally and in Vercel.
+9. In the SQL editor, run `supabase/storage-policies.sql` after the buckets exist.
+10. Enable email/password Auth.
+11. Create the first admin user in Supabase Auth.
+12. Enable Realtime for `public.events` and optionally `public.chat_messages`.
+13. Add the same `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` values locally and in Vercel.
 
 The private `audio` bucket is not publicly readable. Authenticated event owners still need SELECT access to their own `user-id/event-id/file` objects so Supabase can create signed admin preview and playback URLs.
 
