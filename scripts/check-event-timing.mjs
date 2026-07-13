@@ -123,7 +123,8 @@ assert(!eventService.includes("calculateEndsAt"), "Event service must not recalc
 const adminPage = readFileSync("src/pages/AdminPage.tsx", "utf8");
 assert(adminPage.includes(">Start Event<"), "Admin must expose a single Start Event action.");
 assert(!adminPage.includes(">Schedule Event<") && !adminPage.includes(">Start Now<"), "Admin must not expose Schedule Event or Start Now actions.");
-assert(adminPage.includes("Unassigned Legacy Messages") && adminPage.includes("getTrustedEventMessages"), "Admin archive must separate trusted event messages from legacy messages.");
+assert(adminPage.includes("getTrustedEventMessages") && adminPage.includes("message.event_id === event.id"), "Admin archive must keep archived messages scoped to their event id.");
+assert(!adminPage.includes("Unassigned Legacy Messages") && !adminPage.includes("getUnassignedLegacyChatMessages"), "Admin archive must not render or load the obsolete unassigned legacy messages block.");
 
 const migrationSql = readFileSync("supabase/event-end-times-migration.sql", "utf8");
 assert(migrationSql.includes("duration_hours::double precision * interval '1 hour'"), "Migration must backfill ends_at from fractional duration hours.");

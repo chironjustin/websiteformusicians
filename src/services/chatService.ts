@@ -162,32 +162,3 @@ export async function deleteChatMessage(id: string) {
   const { error } = await supabase.from("chat_messages").delete().eq("id", id);
   if (error) throw new Error(error.message);
 }
-
-export async function getUnassignedLegacyChatMessages() {
-  const { data, error } = await orderedMessagesQuery()
-    .is("event_id", null)
-    .returns<ChatMessage[]>();
-
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-export async function assignChatMessageToEvent(messageId: string, eventId: string) {
-  assertEventId(eventId);
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) throw new Error("You must be signed in to assign legacy messages.");
-
-  const { data, error } = await supabase
-    .from("chat_messages")
-    .update({
-      event_id: eventId,
-      legacy_assignment_confirmed_at: new Date().toISOString(),
-      legacy_assignment_confirmed_by: userData.user.id,
-    })
-    .eq("id", messageId)
-    .select("*")
-    .single<ChatMessage>();
-
-  if (error) throw new Error(error.message);
-  return data;
-}

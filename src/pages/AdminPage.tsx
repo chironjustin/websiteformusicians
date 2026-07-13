@@ -3,7 +3,7 @@ import { Radio, Trash2 } from "lucide-react";
 import { dateTimeLocalToUtc, formatDateTimeLocal } from "@/lib/datetime";
 import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
-import { assignChatMessageToEvent, deleteChatMessage, getAdminChatMessages, getUnassignedLegacyChatMessages, sendAdminMessage, setMessageHighlighted, setMessagePinned, setMessageStatus, updateMessageFlags } from "@/services/chatService";
+import { deleteChatMessage, getAdminChatMessages, sendAdminMessage, setMessageHighlighted, setMessagePinned, setMessageStatus, updateMessageFlags } from "@/services/chatService";
 import { createEvent, deleteArchivedEvent, endEvent, getAdminEvents, startEvent, updateEvent } from "@/services/eventService";
 import { getPublicImageUrl, getSignedAudioUrl, uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage } from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
@@ -38,12 +38,6 @@ type ChatCounts = {
   pinned: number;
   highlighted: number;
   admin: number;
-};
-
-type LegacyChatMessage = {
-  message: ChatMessage;
-  reason: string;
-  suggestedEvent: MusicEvent | null;
 };
 
 const emptyForm: FormState = {
@@ -523,30 +517,7 @@ function countMessages(messages: ChatMessage[] = []): ChatCounts {
 }
 
 function getTrustedEventMessages(event: MusicEvent, messages: ChatMessage[] = []) {
-  return messages.filter(message => message.event_id === event.id && (messageFitsEventWindow(message, event) || Boolean(message.legacy_assignment_confirmed_at)));
-}
-
-function messageFitsEventWindow(message: ChatMessage, event: MusicEvent) {
-  if (!event.starts_at || !event.ends_at) return false;
-  const createdAt = new Date(message.created_at).getTime();
-  const startsAt = new Date(event.starts_at).getTime();
-  const endsAt = new Date(event.ends_at).getTime();
-  if ([createdAt, startsAt, endsAt].some(Number.isNaN)) return false;
-  return createdAt >= startsAt && createdAt <= endsAt;
-}
-
-function getPossibleEventMatches(message: ChatMessage, events: MusicEvent[]) {
-  return events.filter(event => messageFitsEventWindow(message, event));
-}
-
-function getLegacyReason(message: ChatMessage, assignedEvent: MusicEvent | null, events: MusicEvent[]) {
-  if (!message.event_id) return "missing event_id";
-  if (!assignedEvent) return "invalid event_id";
-  const matches = getPossibleEventMatches(message, events);
-  if (matches.length > 1) return "timestamp overlaps multiple event windows";
-  if (matches.length === 0) return "timestamp outside all event windows";
-  if (!matches.some(event => event.id === message.event_id)) return "assigned event does not match timestamp window";
-  return "legacy record predates reliable event scoping";
+  return messages.filter(message => message.event_id === event.id);
 }
 
 function useObjectUrl(file: File | null) {
@@ -570,16 +541,13 @@ function useObjectUrl(file: File | null) {
 function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDeleted: (eventId: string) => void }) {
   const [selectedId, setSelectedId] = useState<string | null>(events[0]?.id ?? null);
   const [messagesByEvent, setMessagesByEvent] = useState<Record<string, ChatMessage[]>>({});
-  const [unassignedMessages, setUnassignedMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
-  const [assigningId, setAssigningId] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<MusicEvent | null>(null);
   const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
   const [deletePhrase, setDeletePhrase] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [reloadKey, setReloadKey] = useState(0);
   const eventKey = useMemo(() => events.map(event => event.id).join("|"), [events]);
 
   useEffect(() => {
@@ -591,7 +559,6 @@ function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDe
   useEffect(() => {
     if (events.length === 0) {
       setMessagesByEvent({});
-      setUnassignedMessages([]);
       setError("");
       return;
     }
@@ -599,17 +566,13 @@ function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDe
     let active = true;
     setLoading(true);
     setError("");
-    Promise.all([
-      Promise.all(events.map(async event => {
+    Promise.all(events.map(async event => {
         const messages = await getAdminChatMessages(event.id);
         return [event.id, messages] as const;
-      })),
-      getUnassignedLegacyChatMessages(),
-    ])
-      .then(([entries, legacyMessages]) => {
+      }))
+      .then(entries => {
         if (!active) return;
         setMessagesByEvent(Object.fromEntries(entries));
-        setUnassignedMessages(legacyMessages);
       })
       .catch(err => {
         if (active) setError(err instanceof Error ? err.message : "Unable to load archived messages.");
@@ -621,57 +584,11 @@ function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDe
     return () => {
       active = false;
     };
-  }, [eventKey, events, reloadKey]);
+  }, [eventKey, events]);
 
   const selectedEvent = events.find(event => event.id === selectedId) ?? null;
   const selectedMessages = selectedEvent ? getTrustedEventMessages(selectedEvent, messagesByEvent[selectedEvent.id] ?? []) : [];
   const selectedCounts = countMessages(selectedMessages);
-  const legacyMessages = useMemo(() => {
-    const messages: LegacyChatMessage[] = [];
-    const seenIds = new Set<string>();
-
-    for (const message of unassignedMessages) {
-      const matches = getPossibleEventMatches(message, events);
-      messages.push({
-        message,
-        reason: getLegacyReason(message, null, events),
-        suggestedEvent: matches.length === 1 ? matches[0] : null,
-      });
-      seenIds.add(message.id);
-    }
-
-    for (const event of events) {
-      for (const message of messagesByEvent[event.id] ?? []) {
-        if (seenIds.has(message.id)) continue;
-        if (getTrustedEventMessages(event, [message]).length > 0) continue;
-        const matches = getPossibleEventMatches(message, events);
-        messages.push({
-          message,
-          reason: getLegacyReason(message, event, events),
-          suggestedEvent: matches.length === 1 ? matches[0] : null,
-        });
-        seenIds.add(message.id);
-      }
-    }
-
-    return messages.sort((a, b) => new Date(a.message.created_at).getTime() - new Date(b.message.created_at).getTime());
-  }, [events, messagesByEvent, unassignedMessages]);
-
-  async function assignLegacyMessage(message: ChatMessage, targetEvent: MusicEvent) {
-    if (!window.confirm(`Assign this legacy message to "${targetEvent.title}"?`)) return;
-    setAssigningId(message.id);
-    setError("");
-    setNotice("");
-    try {
-      await assignChatMessageToEvent(message.id, targetEvent.id);
-      setNotice("Legacy message assigned.");
-      setReloadKey(key => key + 1);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to assign legacy message.");
-    } finally {
-      setAssigningId("");
-    }
-  }
 
   function openDeleteDialog(event: MusicEvent) {
     setDeleteTarget(event);
@@ -812,12 +729,6 @@ function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDe
         </div>
       )}
 
-      <LegacyMessagesPanel
-        messages={legacyMessages}
-        events={events}
-        assigningId={assigningId}
-        onAssign={assignLegacyMessage}
-      />
       {deleteTarget && (
         <DeleteArchivedEventDialog
           event={deleteTarget}
@@ -913,59 +824,6 @@ function ArchiveImagePreview({ event }: { event: MusicEvent }) {
   );
 }
 
-function LegacyMessagesPanel({
-  messages,
-  events,
-  assigningId,
-  onAssign,
-}: {
-  messages: LegacyChatMessage[];
-  events: MusicEvent[];
-  assigningId: string;
-  onAssign: (message: ChatMessage, targetEvent: MusicEvent) => Promise<void>;
-}) {
-  return (
-    <Panel title={`Unassigned Legacy Messages (${messages.length})`}>
-      <p style={{ margin: "0 0 12px", fontSize: 13, color: "#6b7280" }}>
-        These messages are not shown inside a specific event archive because their event relationship is missing, invalid, or suspicious. Timestamp suggestions are informational only until you confirm an assignment.
-      </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {messages.length === 0 && <p style={{ fontSize: 13, color: "#9ca3af" }}>No unassigned legacy messages.</p>}
-        {messages.map(({ message, reason, suggestedEvent }) => (
-          <div key={message.id} style={chatMessageStyle(message)}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-              <strong style={{ fontSize: 12 }}>{message.display_name}</strong>
-              <span style={{ fontSize: 11, color: "#6b7280" }}>{formatChatTime(message.created_at)}</span>
-              <span style={badgeStyle}>{message.status}</span>
-              {message.is_admin && <span style={badgeStyle}>Admin</span>}
-              {message.is_pinned && <span style={badgeStyle}>Pinned</span>}
-              {message.is_highlighted && <span style={badgeStyle}>Highlighted</span>}
-              {message.legacy_assignment_confirmed_at && <span style={badgeStyle}>Confirmed</span>}
-            </div>
-            <p style={{ fontSize: 13, color: "#374151", overflowWrap: "anywhere" }}>{message.body}</p>
-            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#6b7280" }}>Reason: {reason}</p>
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-              Suggested event: {suggestedEvent ? suggestedEvent.title : "none"}
-            </p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-              {suggestedEvent && (
-                <SmallButton disabled={assigningId === message.id} onClick={() => onAssign(message, suggestedEvent)}>
-                  Assign to suggested event
-                </SmallButton>
-              )}
-              {events.map(event => (
-                <SmallButton key={`${message.id}-${event.id}`} disabled={assigningId === message.id} color="#6b7280" onClick={() => onAssign(message, event)}>
-                  Assign to {event.title}
-                </SmallButton>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
 function ArchiveMessageSection({ event, title, messages }: { event: MusicEvent; title: string; messages: ChatMessage[] }) {
   const artistName = event.artist_name || "artist";
   const artistUrl = getPublicImageUrl("artist-images", event.artist_image_path);
@@ -983,7 +841,6 @@ function ArchiveMessageSection({ event, title, messages }: { event: MusicEvent; 
               <span style={badgeStyle}>{message.status}</span>
               {message.is_pinned && <span style={badgeStyle}>Pinned</span>}
               {message.is_highlighted && <span style={badgeStyle}>Highlighted</span>}
-              {message.legacy_assignment_confirmed_at && <span style={badgeStyle}>Confirmed</span>}
             </div>
             <p style={{ fontSize: 13, color: "#374151", overflowWrap: "anywhere" }}>{message.body}</p>
           </div>
