@@ -53,27 +53,19 @@ export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
   assertEventId(input.event_id);
   const displayName = cleanText(input.display_name, MAX_DISPLAY_NAME);
   const body = cleanText(input.body, MAX_BODY);
+  const clientToken = input.client_token ?? crypto.randomUUID();
   assertDisplayName(displayName);
   assertBody(body);
 
-  const { data, error } = await supabase
-    .from("chat_messages")
-    .insert({
-      event_id: input.event_id,
-      display_name: displayName,
-      body,
-      client_token: input.client_token ?? null,
-      status: "pending",
-      is_admin: false,
-      is_pinned: false,
-      is_highlighted: false,
-      is_liked: false,
-    })
-    .select("*")
-    .single<ChatMessage>();
+  const { data, error } = await supabase.rpc("submit_chat_message", {
+    p_body: body,
+    p_client_token: clientToken,
+    p_display_name: displayName,
+    p_event_id: input.event_id,
+  });
 
   if (error) throw new Error(error.message);
-  return data;
+  return data as ChatMessage;
 }
 
 export async function getVisitorMessageStatus(eventId: string, messageId: string, clientToken: string) {

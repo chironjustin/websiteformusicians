@@ -69,7 +69,10 @@ const publicPage = readFileSync("src/pages/PublicEventPage.tsx", "utf8");
 assert(publicPage.includes('if (state !== "live")'), "Public page must not request audio while upcoming.");
 assert(publicPage.includes("<AudioPlayer audioUrl={audioUrl} startsAt={startsAt} />"), "Live must keep the audio controls mounted in the compact header.");
 assert(publicPage.includes('aria-label={playing ? "Pause live audio" : "Resume live audio"}'), "Live play control must remain an accessible resume/pause control.");
+assert(publicPage.includes('playsInline preload="metadata"'), "Live audio must be mobile-ready and preload metadata for synchronized resume.");
+assert(publicPage.includes('type="button"') && publicPage.includes('touchAction: "manipulation"'), "Live play control must stay tappable on mobile.");
 assert(publicPage.includes('pointerEvents: "none"') && publicPage.includes('role="progressbar"'), "Live audio progress must remain visual-only and non-seekable.");
+assert(publicPage.includes("durationRef.current") && publicPage.includes("setProgress(livePosition)") && publicPage.includes("window.setInterval"), "Live progress must derive from the event timeline even while local audio is paused.");
 assert(publicPage.includes("flexWrap: \"nowrap\"") && publicPage.includes("<CompactLiveCountdown target={liveTarget} />"), "Live header must keep title, audio player, and event countdown in one compact row.");
 assert(publicPage.includes("function ChatMessageBubble") && publicPage.includes("const pinnedMessage = messages.find"), "Live chat must render pinned content in a reserved area before the feed.");
 assert(publicPage.includes('useEventChat(state === "live" ? event?.id : undefined'), "Public chat subscription must only initialize while live.");
@@ -98,7 +101,7 @@ assert(chatHook.includes("filter: `event_id=eq.${eventId}`"), "Realtime chat sub
 
 const chatService = readFileSync("src/services/chatService.ts", "utf8");
 assert(chatService.includes('.eq("event_id", eventId)') && chatService.includes('.eq("status", "approved")'), "Public chat query must fetch approved messages for the active event only.");
-assert(chatService.includes("client_token: input.client_token") && chatService.includes("get_visitor_chat_message_status"), "Visitor submissions must carry a client token and status lookup must use the scoped RPC.");
+assert(chatService.includes('supabase.rpc("submit_chat_message"') && chatService.includes("p_client_token") && chatService.includes("get_visitor_chat_message_status"), "Visitor submissions must use the scoped public RPC and pending-status lookup.");
 assert(chatService.includes('supabase.rpc("set_chat_message_pin"') && chatService.includes('supabase.rpc("set_chat_message_highlight"'), "Pin and highlight actions must use event-scoped RPC helpers.");
 assert(chatService.includes("p_message_id") && chatService.includes("p_pinned") && chatService.includes("p_highlighted"), "Pin and highlight RPC calls must use the deployed p_ argument names.");
 
@@ -108,9 +111,10 @@ assert(publicLivePage.includes("live ends {label}"), "Live header must show the 
 const chatSchema = readFileSync("supabase/chat-schema.sql", "utf8");
 assert(chatSchema.includes("event_id uuid references public.events") && chatSchema.includes("client_token uuid"), "Chat schema must associate messages with events and pending-status client tokens.");
 assert(chatSchema.includes("chat_messages_event_status_created_idx") && chatSchema.includes("chat_messages_event_client_token_idx"), "Chat schema must include event-scoped retrieval indexes.");
-assert(chatSchema.includes("grant insert on public.chat_messages to anon, authenticated"), "Public visitor message inserts must be granted only to anon/authenticated roles.");
-assert(chatSchema.includes("to anon, authenticated") && chatSchema.includes("events.starts_at <= now()") && chatSchema.includes("events.ends_at > now()"), "Visitor insert policy must require the active live timestamp window.");
-assert(chatSchema.includes("user_id is null") && chatSchema.includes("is_admin = false") && chatSchema.includes("is_pinned = false") && chatSchema.includes("is_highlighted = false") && chatSchema.includes("is_liked = false"), "Visitor insert policy must force non-privileged pending messages.");
+assert(chatSchema.includes("create or replace function public.submit_chat_message"), "Chat schema must provide a public pending-message submit RPC.");
+assert(chatSchema.includes("revoke insert on public.chat_messages from anon"), "Anonymous visitors must not rely on fragile direct table inserts.");
+assert(chatSchema.includes("events.starts_at <= now()") && chatSchema.includes("events.ends_at > now()"), "Visitor submit RPC must require the active live timestamp window.");
+assert(chatSchema.includes("user_id") && chatSchema.includes("is_admin") && chatSchema.includes("is_pinned") && chatSchema.includes("is_highlighted") && chatSchema.includes("is_liked"), "Visitor submit RPC must force non-privileged pending messages.");
 assert(chatSchema.includes("Authenticated admins can read unassigned legacy chat messages"), "Chat schema must allow legacy unassigned messages to be reviewed separately.");
 assert(chatSchema.includes("set_chat_message_pin") && chatSchema.includes("set_chat_message_highlight") && chatSchema.includes("pg_advisory_xact_lock"), "Chat schema must provide atomic event-scoped pin/highlight helpers.");
 assert(chatSchema.includes("p_message_id uuid") && chatSchema.includes("p_pinned boolean") && chatSchema.includes("p_highlighted boolean"), "Chat emphasis RPC signatures must use p_ argument names.");
