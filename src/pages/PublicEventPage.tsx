@@ -736,6 +736,7 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl }:
 function ChatMessageBubble({ message, joined, eventId, artistName, artistUrl, pinnedArea = false }: { message: ChatMessage; joined: boolean; eventId: string; artistName: string; artistUrl: string; pinnedArea?: boolean }) {
   const displayName = message.is_admin ? artistName : message.display_name;
   const showAvatar = joined || message.is_admin;
+  const labels = getPublicMessageLabels(message);
 
   return (
     <div style={{
@@ -754,13 +755,17 @@ function ChatMessageBubble({ message, joined, eventId, artistName, artistUrl, pi
       )}
       <div style={{ minWidth: 0 }}>
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em", overflowWrap: "anywhere" }}>
-          {displayName}{message.is_pinned ? " [pinned]" : ""}
+          {displayName}{labels.length > 0 ? ` ${labels.join(" ")}` : ""}
         </p>
         <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
         {message.is_liked && <ArtistLikeIndicator artistUrl={artistUrl} />}
       </div>
     </div>
   );
+}
+
+function getPublicMessageLabels(message: ChatMessage) {
+  return message.is_pinned ? ["[pinned]"] : [];
 }
 
 function ArtistLikeIndicator({ artistUrl }: { artistUrl: string }) {

@@ -837,7 +837,6 @@ function ArchiveMessageSection({ event, title, messages }: { event: MusicEvent; 
               {message.is_pinned && <span style={badgeStyle}>Pinned</span>}
               {message.is_highlighted && <span style={badgeStyle}>Highlighted</span>}
               {message.legacy_assignment_confirmed_at && <span style={badgeStyle}>Confirmed</span>}
-              {message.is_liked && <span style={badgeStyle}>Liked</span>}
             </div>
             <p style={{ fontSize: 13, color: "#374151", overflowWrap: "anywhere" }}>{message.body}</p>
           </div>
@@ -979,13 +978,12 @@ function ChatPreview({ messages, busy, run }: { messages: ChatMessage[]; busy: b
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{formatChatTime(message.created_at)}</span>
               {message.is_admin && <span style={darkBadgeStyle}>Admin</span>}
               {message.is_pinned && <span style={darkBadgeStyle}>Pinned</span>}
-              {message.is_liked && <span style={darkBadgeStyle}>Liked</span>}
             </div>
             <p style={{ fontSize: 13, color: "rgba(255,255,255,0.82)", overflowWrap: "anywhere" }}>{message.body}</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
               <SmallButton disabled={busy} onClick={() => run(message.is_pinned ? "Message unpinned." : "Message pinned.", () => setMessagePinned(message.id, !message.is_pinned))}>{message.is_pinned ? "Unpin" : "Pin"}</SmallButton>
               <SmallButton disabled={busy} onClick={() => run(message.is_highlighted ? "Highlight removed." : "Message highlighted.", () => setMessageHighlighted(message.id, !message.is_highlighted))}>{message.is_highlighted ? "Remove Highlight" : "Highlight"}</SmallButton>
-              <SmallButton disabled={busy} onClick={() => run(message.is_liked ? "Like removed." : "Message liked.", () => updateMessageFlags(message.id, { is_liked: !message.is_liked }).then(() => undefined))}>{message.is_liked ? "Unlike" : "Like as Artist"}</SmallButton>
+              <SmallButton disabled={busy} onClick={() => run(message.is_liked ? "Artist reaction removed." : "Artist reaction added.", () => updateMessageFlags(message.id, { is_liked: !message.is_liked }).then(() => undefined))}>{message.is_liked ? "Unlike" : "Like as Artist"}</SmallButton>
               <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(message.id))}>Delete</SmallButton>
             </div>
           </div>
@@ -1006,7 +1004,6 @@ function ChatSection({ title, empty, messages, children }: { title: string; empt
               <strong style={{ fontSize: 12 }}>{message.display_name}</strong>
               {message.is_admin && <span style={badgeStyle}>Admin</span>}
               {message.is_pinned && <span style={badgeStyle}>Pinned</span>}
-              {message.is_liked && <span style={badgeStyle}>Liked</span>}
             </div>
             <p style={{ fontSize: 13, color: "#374151", overflowWrap: "anywhere" }}>{message.body}</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
