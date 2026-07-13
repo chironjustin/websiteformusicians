@@ -612,7 +612,10 @@ function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDe
     setNotice("");
     try {
       const result = await deleteArchivedEvent(deleteTarget.id);
-      const storageFailureCount = result.storageFailures.length;
+      const storageIssueCount = result.storageFailures.length
+        + result.invalidStorageRefs.length
+        + result.notFoundBeforeDelete.length
+        + result.stillPresentStorage.length;
       setMessagesByEvent(current => {
         const next = { ...current };
         delete next[deleteTarget.id];
@@ -626,8 +629,8 @@ function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDe
       setDeleteTarget(null);
       setDeleteStep(1);
       setDeletePhrase("");
-      setNotice(storageFailureCount > 0
-        ? `Archived event deleted, but ${storageFailureCount} storage object${storageFailureCount === 1 ? "" : "s"} could not be removed. Check deletion audit for the orphaned path details.`
+      setNotice(storageIssueCount > 0
+        ? `Archived event deleted, but ${storageIssueCount} storage cleanup issue${storageIssueCount === 1 ? "" : "s"} need review. Check deletion audit for exact bucket/path details.`
         : "Archived event permanently deleted.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to permanently delete archived event.");

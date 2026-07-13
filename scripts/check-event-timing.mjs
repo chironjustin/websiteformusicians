@@ -124,6 +124,8 @@ const deleteArchivedEventFunction = readFileSync("supabase/functions/delete-arch
 assert(deleteArchivedEventFunction.includes("function normalizeStoragePath") && deleteArchivedEventFunction.includes("new URL(trimmed)"), "Archived event deletion must normalize raw paths and Storage URLs before cleanup.");
 assert(!deleteArchivedEventFunction.includes("function cleanPath"), "Archived event deletion must not discard Storage URLs with the old cleanPath helper.");
 assert(deleteArchivedEventFunction.includes("preservedSharedStorage") && deleteArchivedEventFunction.includes("invalidStorageRefs"), "Archived event deletion must report shared and invalid storage references.");
+assert(deleteArchivedEventFunction.includes("storageObjectExists") && deleteArchivedEventFunction.includes("existsBeforeDelete") && deleteArchivedEventFunction.includes("existsAfterDelete"), "Archived event deletion must verify Storage object existence before and after remove().");
+assert(deleteArchivedEventFunction.includes("verifiedRemovedStorage") && deleteArchivedEventFunction.includes("notFoundBeforeDelete") && deleteArchivedEventFunction.includes("stillPresentStorage"), "Archived event deletion must separate verified removals, missing objects, and still-present objects.");
 
 const adminPage = readFileSync("src/pages/AdminPage.tsx", "utf8");
 assert(adminPage.includes(">Start Event<"), "Admin must expose a single Start Event action.");

@@ -42,6 +42,37 @@ type StorageFailure = {
   error: string;
 };
 
+type StoragePathParts = {
+  parentFolder: string;
+  basename: string;
+};
+
+type StorageDiagnostic = {
+  bucket: Bucket;
+  column: MediaColumn;
+  originalValue: string;
+  normalizedPath: string;
+  parentFolder: string;
+  basename: string;
+  normalizationSucceeded: boolean;
+};
+
+type StorageRemovalRecord = {
+  bucket: string;
+  column: string;
+  path: string;
+  parentFolder: string;
+  basename: string;
+};
+
+type NotFoundBeforeDeleteRecord = StorageRemovalRecord & {
+  reason: string;
+};
+
+type StillPresentStorageRecord = StorageRemovalRecord & {
+  error: string;
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -176,6 +207,38 @@ function originalMediaFields(event: EventRow) {
   };
 }
 
+function splitStoragePath(path: string): StoragePathParts {
+  const normalized = normalizePathSegments(path);
+  const parts = normalized.split("/");
+  const basename = parts.at(-1) ?? "";
+  if (!basename) throw new Error("Storage path is missing a filename.");
+  return {
+    parentFolder: parts.slice(0, -1).join("/"),
+    basename,
+  };
+}
+
+async function storageObjectExists(
+  adminClient: ReturnType<typeof createClient>,
+  bucket: Bucket,
+  path: string,
+) {
+  const { parentFolder, basename } = splitStoragePath(path);
+  const { data, error } = await adminClient.storage.from(bucket).list(parentFolder, {
+    search: basename,
+    limit: 100,
+  });
+
+  if (error) throw new Error(error.message);
+
+  return {
+    parentFolder,
+    basename,
+    exists: (data ?? []).some(item => item.name === basename),
+    matches: (data ?? []).map(item => item.name),
+  };
+}
+
 async function writeAudit(
   adminClient: ReturnType<typeof createClient>,
   event: Partial<EventRow> | null,
@@ -261,11 +324,23 @@ Deno.serve(async request => {
   const storageCollection = eventStorageRefs(event);
   const refs = storageCollection.refs;
   const invalidStorageRefs = storageCollection.invalidRefs;
+  const storageDiagnostics: StorageDiagnostic[] = refs.map(ref => {
+    const { parentFolder, basename } = splitStoragePath(ref.path);
+    return {
+      bucket: ref.bucket,
+      column: ref.column,
+      originalValue: ref.originalValue,
+      normalizedPath: ref.path,
+      parentFolder,
+      basename,
+      normalizationSucceeded: true,
+    };
+  });
 
   console.log("delete-archived-event media refs", {
     eventId: event.id,
     originalMediaFields: originalMediaFields(event),
-    normalizedRefs: refs.map(ref => ({ bucket: ref.bucket, column: ref.column, path: ref.path })),
+    storageDiagnostics,
     invalidStorageRefs,
   });
 
@@ -318,43 +393,131 @@ Deno.serve(async request => {
     originalValue: ref.originalValue,
     error: ref.reason,
   }));
-  const removedStorage: Array<{ bucket: string; path: string }> = [];
-  const grouped = new Map<string, string[]>();
+  const verifiedRemovedStorage: StorageRemovalRecord[] = [];
+  const notFoundBeforeDelete: NotFoundBeforeDeleteRecord[] = [];
+  const stillPresentStorage: StillPresentStorageRecord[] = [];
 
   for (const ref of exclusiveRefs) {
-    grouped.set(ref.bucket, [...(grouped.get(ref.bucket) ?? []), ref.path]);
-  }
+    const { parentFolder, basename } = splitStoragePath(ref.path);
+    let before;
 
-  for (const [bucket, paths] of grouped.entries()) {
-    console.log("delete-archived-event storage remove request", { eventId: event.id, bucket, paths });
-    const { data, error } = await adminClient.storage.from(bucket).remove(paths);
-    console.log("delete-archived-event storage remove response", {
-      eventId: event.id,
-      bucket,
-      requestedPaths: paths,
-      removedObjects: data?.map(item => item.name) ?? [],
-      error: error?.message ?? null,
-    });
-
-    if (!error) {
-      for (const path of paths) {
-        removedStorage.push({ bucket, path });
-      }
+    try {
+      before = await storageObjectExists(adminClient, ref.bucket, ref.path);
+    } catch (error) {
+      const failure = {
+        bucket: ref.bucket,
+        path: ref.path,
+        column: ref.column,
+        originalValue: ref.originalValue,
+        error: error instanceof Error ? error.message : "Unable to verify object before deletion.",
+      };
+      storageFailures.push(failure);
+      console.log("delete-archived-event storage exists-before error", { eventId: event.id, ...failure });
       continue;
     }
 
-    for (const path of paths) {
-      storageFailures.push({ bucket, path, error: error.message });
+    console.log("delete-archived-event storage exists before", {
+      eventId: event.id,
+      bucket: ref.bucket,
+      column: ref.column,
+      path: ref.path,
+      parentFolder: before.parentFolder,
+      basename: before.basename,
+      existsBeforeDelete: before.exists,
+      matchingNames: before.matches,
+    });
+
+    if (!before.exists) {
+      notFoundBeforeDelete.push({
+        bucket: ref.bucket,
+        column: ref.column,
+        path: ref.path,
+        parentFolder,
+        basename,
+        reason: "not_found_before_delete",
+      });
+      continue;
+    }
+
+    console.log("delete-archived-event storage remove request", { eventId: event.id, bucket: ref.bucket, path: ref.path });
+    const { data, error } = await adminClient.storage.from(ref.bucket).remove([ref.path]);
+    console.log("delete-archived-event storage remove response", {
+      eventId: event.id,
+      bucket: ref.bucket,
+      requestedPath: ref.path,
+      returnedObjects: data?.map(item => item.name) ?? [],
+      error: error?.message ?? null,
+    });
+
+    let after;
+    try {
+      after = await storageObjectExists(adminClient, ref.bucket, ref.path);
+    } catch (existsError) {
+      const failure = {
+        bucket: ref.bucket,
+        path: ref.path,
+        column: ref.column,
+        originalValue: ref.originalValue,
+        error: existsError instanceof Error ? existsError.message : "Unable to verify object after deletion.",
+      };
+      storageFailures.push(failure);
+      console.log("delete-archived-event storage exists-after error", { eventId: event.id, ...failure });
+      continue;
+    }
+
+    console.log("delete-archived-event storage exists after", {
+      eventId: event.id,
+      bucket: ref.bucket,
+      column: ref.column,
+      path: ref.path,
+      parentFolder: after.parentFolder,
+      basename: after.basename,
+      existsAfterDelete: after.exists,
+      matchingNames: after.matches,
+    });
+
+    if (error) {
+      storageFailures.push({
+        bucket: ref.bucket,
+        path: ref.path,
+        column: ref.column,
+        originalValue: ref.originalValue,
+        error: error.message,
+      });
+    }
+
+    if (!after.exists) {
+      verifiedRemovedStorage.push({
+        bucket: ref.bucket,
+        column: ref.column,
+        path: ref.path,
+        parentFolder,
+        basename,
+      });
+    } else {
+      stillPresentStorage.push({
+        bucket: ref.bucket,
+        column: ref.column,
+        path: ref.path,
+        parentFolder,
+        basename,
+        error: error?.message ?? "Object still exists after Storage remove call.",
+      });
     }
   }
 
-  const result = storageFailures.length > 0 ? "partial_success_storage_failed" : "success";
+  const result = storageFailures.length > 0 || invalidStorageRefs.length > 0 || notFoundBeforeDelete.length > 0 || stillPresentStorage.length > 0
+    ? "partial_success_storage_failed"
+    : "success";
   await writeAudit(adminClient, event, requester.id, result, storageFailures, {
     deleted_chat_messages: chatCount ?? 0,
     original_media_fields: originalMediaFields(event),
     collected_storage_refs: refs.map(ref => ({ bucket: ref.bucket, column: ref.column, path: ref.path })),
+    storage_diagnostics: storageDiagnostics,
     invalid_storage_refs: invalidStorageRefs,
-    removed_storage: removedStorage,
+    verified_removed_storage: verifiedRemovedStorage,
+    not_found_before_delete: notFoundBeforeDelete,
+    still_present_storage: stillPresentStorage,
     preserved_shared_storage: preservedSharedStorage,
   });
 
@@ -363,7 +526,9 @@ Deno.serve(async request => {
     eventId: event.id,
     deletedChatMessages: chatCount ?? 0,
     collectedStorageRefs: refs.map(ref => ({ bucket: ref.bucket, column: ref.column, path: ref.path })),
-    removedStorage,
+    verifiedRemovedStorage,
+    notFoundBeforeDelete,
+    stillPresentStorage,
     preservedSharedStorage,
     invalidStorageRefs,
     storageFailures,

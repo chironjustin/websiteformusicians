@@ -121,7 +121,9 @@ export type DeleteArchivedEventResult = {
   eventId: string;
   deletedChatMessages: number;
   collectedStorageRefs: Array<{ bucket: string; column: string; path: string }>;
-  removedStorage: Array<{ bucket: string; path: string }>;
+  verifiedRemovedStorage: Array<{ bucket: string; column: string; path: string; parentFolder: string; basename: string }>;
+  notFoundBeforeDelete: Array<{ bucket: string; column: string; path: string; parentFolder: string; basename: string; reason: string }>;
+  stillPresentStorage: Array<{ bucket: string; column: string; path: string; parentFolder: string; basename: string; error: string }>;
   preservedSharedStorage: Array<{ bucket: string; column: string; path: string }>;
   invalidStorageRefs: Array<{ bucket: string; column: string; originalValue: string; reason: string }>;
   storageFailures: Array<{ bucket: string; path: string; column?: string; originalValue?: string; error: string }>;
