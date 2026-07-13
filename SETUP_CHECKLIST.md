@@ -9,8 +9,11 @@
 - [ ] Run `supabase/event-end-times-migration.sql` in the SQL editor to backfill explicit end timestamps for older duration-based events.
 - [ ] Run `supabase/chat-schema.sql` in the SQL editor.
 - [ ] Run `supabase/chat-pending-status.sql` in the SQL editor for pending-message status tracking.
+- [ ] Run `supabase/archive-delete-audit.sql` in the SQL editor for permanent archived-event deletion audit logs.
 - [ ] Run `supabase/event-status-cron.sql` in the SQL editor.
 - [ ] Confirm Supabase Cron is enabled/available and the `update-event-statuses` job runs every minute.
+- [ ] Deploy the `supabase/functions/delete-archived-event` Edge Function.
+- [ ] Configure the Edge Function with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in Supabase function secrets. Never add the service-role key to frontend environment variables.
 - [ ] Create Storage bucket `artist-images` as public.
 - [ ] Create Storage bucket `artwork` as public.
 - [ ] Create Storage bucket `merch-images` as public.

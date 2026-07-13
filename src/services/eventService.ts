@@ -115,3 +115,23 @@ export async function deleteEvent(id: string) {
   const { error } = await supabase.from("events").delete().eq("id", id);
   if (error) throw toUsefulError(error, "Unable to delete event.");
 }
+
+export type DeleteArchivedEventResult = {
+  deleted: boolean;
+  eventId: string;
+  deletedChatMessages: number;
+  removedStorage: Array<{ bucket: string; path: string }>;
+  storageFailures: Array<{ bucket: string; path: string; error: string }>;
+};
+
+export async function deleteArchivedEvent(id: string) {
+  await requireUserId();
+  const { data, error } = await supabase.functions.invoke<DeleteArchivedEventResult>("delete-archived-event", {
+    body: { eventId: id },
+  });
+
+  if (error) throw toUsefulError(error, "Unable to permanently delete archived event.");
+  if (!data?.deleted) throw new Error("Archived event was not deleted.");
+
+  return data;
+}

@@ -1,10 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Radio } from "lucide-react";
+import { Radio, Trash2 } from "lucide-react";
 import { dateTimeLocalToUtc, formatDateTimeLocal } from "@/lib/datetime";
 import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
 import { assignChatMessageToEvent, deleteChatMessage, getAdminChatMessages, getUnassignedLegacyChatMessages, sendAdminMessage, setMessageHighlighted, setMessagePinned, setMessageStatus, updateMessageFlags } from "@/services/chatService";
-import { createEvent, endEvent, getAdminEvents, startEvent, updateEvent } from "@/services/eventService";
+import { createEvent, deleteArchivedEvent, endEvent, getAdminEvents, startEvent, updateEvent } from "@/services/eventService";
 import { getPublicImageUrl, getSignedAudioUrl, uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage } from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
 import type { MusicEvent, UpdateEventInput } from "@/types/event";
@@ -436,7 +436,16 @@ export default function AdminPage() {
           message={message}
         />
       ) : (
-        <ArchivedEventsPanel events={archivedEvents} />
+        <ArchivedEventsPanel
+          events={archivedEvents}
+          onDeleted={eventId => {
+            setEvents(current => current.filter(item => item.id !== eventId));
+            if (event?.id === eventId) {
+              setEvent(null);
+              setForm(emptyForm);
+            }
+          }}
+        />
       )}
     </main>
   );
@@ -558,12 +567,16 @@ function useObjectUrl(file: File | null) {
   return url;
 }
 
-function ArchivedEventsPanel({ events }: { events: MusicEvent[] }) {
+function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDeleted: (eventId: string) => void }) {
   const [selectedId, setSelectedId] = useState<string | null>(events[0]?.id ?? null);
   const [messagesByEvent, setMessagesByEvent] = useState<Record<string, ChatMessage[]>>({});
   const [unassignedMessages, setUnassignedMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [assigningId, setAssigningId] = useState("");
+  const [deletingId, setDeletingId] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<MusicEvent | null>(null);
+  const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
+  const [deletePhrase, setDeletePhrase] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -660,6 +673,52 @@ function ArchivedEventsPanel({ events }: { events: MusicEvent[] }) {
     }
   }
 
+  function openDeleteDialog(event: MusicEvent) {
+    setDeleteTarget(event);
+    setDeleteStep(1);
+    setDeletePhrase("");
+    setError("");
+    setNotice("");
+  }
+
+  function closeDeleteDialog() {
+    if (deletingId) return;
+    setDeleteTarget(null);
+    setDeleteStep(1);
+    setDeletePhrase("");
+  }
+
+  async function permanentlyDeleteArchivedEvent() {
+    if (!deleteTarget || deletePhrase !== "DELETE") return;
+    setDeletingId(deleteTarget.id);
+    setError("");
+    setNotice("");
+    try {
+      const result = await deleteArchivedEvent(deleteTarget.id);
+      const storageFailureCount = result.storageFailures.length;
+      setMessagesByEvent(current => {
+        const next = { ...current };
+        delete next[deleteTarget.id];
+        return next;
+      });
+      if (selectedId === deleteTarget.id) {
+        const nextEvent = events.find(event => event.id !== deleteTarget.id) ?? null;
+        setSelectedId(nextEvent?.id ?? null);
+      }
+      onDeleted(deleteTarget.id);
+      setDeleteTarget(null);
+      setDeleteStep(1);
+      setDeletePhrase("");
+      setNotice(storageFailureCount > 0
+        ? `Archived event deleted, but ${storageFailureCount} storage object${storageFailureCount === 1 ? "" : "s"} could not be removed. Check deletion audit for the orphaned path details.`
+        : "Archived event permanently deleted.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to permanently delete archived event.");
+    } finally {
+      setDeletingId("");
+    }
+  }
+
   return (
     <div style={{ padding: 24, maxWidth: 980, display: "flex", flexDirection: "column", gap: 20 }}>
       <Panel title="Archived Events">
@@ -673,28 +732,41 @@ function ArchivedEventsPanel({ events }: { events: MusicEvent[] }) {
               const counts = countMessages(getTrustedEventMessages(archiveEvent, messagesByEvent[archiveEvent.id] ?? []));
               const artworkUrl = getPublicImageUrl("artwork", archiveEvent.artwork_path);
               return (
-                <button
+                <div
                   key={archiveEvent.id}
-                  type="button"
-                  onClick={() => setSelectedId(archiveEvent.id)}
                   style={{
                     ...archiveCardStyle,
                     borderColor: selectedId === archiveEvent.id ? "#6366f1" : "#e5e7eb",
                     boxShadow: selectedId === archiveEvent.id ? "0 0 0 1px #6366f1" : "none",
                   }}
                 >
-                  {artworkUrl ? (
-                    <img src={artworkUrl} alt="" style={{ width: 54, height: 54, borderRadius: 6, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
-                  ) : (
-                    <span style={{ width: 54, height: 54, borderRadius: 6, background: "#f3f4f6", border: "1px solid #e5e7eb", flexShrink: 0 }} />
-                  )}
-                  <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 4, textAlign: "left" }}>
-                    <strong style={{ fontSize: 13, color: "#111827", overflowWrap: "anywhere" }}>{archiveEvent.title}</strong>
-                    <span style={{ fontSize: 12, color: "#6b7280" }}>{archiveEvent.artist_name || "Unknown artist"}</span>
-                    <span style={{ fontSize: 11, color: "#6b7280" }}>{formatAdminDateTime(archiveEvent.starts_at ?? "")} - {formatAdminDateTime(archiveEvent.ends_at ?? "")}</span>
-                    <span style={{ fontSize: 11, color: "#374151" }}>{archiveEvent.status} · {counts.total} messages · {counts.approved} approved · {counts.pending + counts.rejected} pending/rejected</span>
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(archiveEvent.id)}
+                    style={archiveOpenButtonStyle}
+                  >
+                    {artworkUrl ? (
+                      <img src={artworkUrl} alt="" style={{ width: 54, height: 54, borderRadius: 6, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
+                    ) : (
+                      <span style={{ width: 54, height: 54, borderRadius: 6, background: "#f3f4f6", border: "1px solid #e5e7eb", flexShrink: 0 }} />
+                    )}
+                    <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 4, textAlign: "left" }}>
+                      <strong style={{ fontSize: 13, color: "#111827", overflowWrap: "anywhere" }}>{archiveEvent.title}</strong>
+                      <span style={{ fontSize: 12, color: "#6b7280" }}>{archiveEvent.artist_name || "Unknown artist"}</span>
+                      <span style={{ fontSize: 11, color: "#6b7280" }}>{formatAdminDateTime(archiveEvent.starts_at ?? "")} - {formatAdminDateTime(archiveEvent.ends_at ?? "")}</span>
+                      <span style={{ fontSize: 11, color: "#374151" }}>{archiveEvent.status} · {counts.total} messages · {counts.approved} approved · {counts.pending + counts.rejected} pending/rejected</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete archived event ${archiveEvent.title}`}
+                    disabled={Boolean(deletingId)}
+                    onClick={() => openDeleteDialog(archiveEvent)}
+                    style={trashButtonStyle}
+                  >
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -746,6 +818,81 @@ function ArchivedEventsPanel({ events }: { events: MusicEvent[] }) {
         assigningId={assigningId}
         onAssign={assignLegacyMessage}
       />
+      {deleteTarget && (
+        <DeleteArchivedEventDialog
+          event={deleteTarget}
+          step={deleteStep}
+          phrase={deletePhrase}
+          deleting={deletingId === deleteTarget.id}
+          onPhraseChange={setDeletePhrase}
+          onCancel={closeDeleteDialog}
+          onContinue={() => {
+            setDeleteStep(2);
+            setDeletePhrase("");
+          }}
+          onDelete={permanentlyDeleteArchivedEvent}
+        />
+      )}
+    </div>
+  );
+}
+
+function DeleteArchivedEventDialog({
+  event,
+  step,
+  phrase,
+  deleting,
+  onPhraseChange,
+  onCancel,
+  onContinue,
+  onDelete,
+}: {
+  event: MusicEvent;
+  step: 1 | 2;
+  phrase: string;
+  deleting: boolean;
+  onPhraseChange: (value: string) => void;
+  onCancel: () => void;
+  onContinue: () => void;
+  onDelete: () => void;
+}) {
+  const canDelete = phrase === "DELETE" && !deleting;
+
+  return (
+    <div role="presentation" style={dialogBackdropStyle}>
+      <section role="dialog" aria-modal="true" aria-labelledby="delete-archive-title" style={dialogStyle}>
+        {step === 1 ? (
+          <>
+            <h2 id="delete-archive-title" style={dialogTitleStyle}>Delete archived event?</h2>
+            <p style={dialogCopyStyle}>
+              Delete "{event.title}"? This will permanently remove the event, its chat history, and event-owned media.
+            </p>
+            <div style={dialogActionsStyle}>
+              <button type="button" disabled={deleting} onClick={onCancel} style={secondaryButton}>Cancel</button>
+              <button type="button" disabled={deleting} onClick={onContinue} style={buttonStyle("#b91c1c")}>Continue</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 id="delete-archive-title" style={dialogTitleStyle}>Permanent deletion cannot be undone.</h2>
+            <p style={dialogCopyStyle}>Type DELETE to continue.</p>
+            <input
+              value={phrase}
+              onChange={input => onPhraseChange(input.target.value)}
+              autoFocus
+              autoComplete="off"
+              aria-label="Type DELETE to confirm permanent deletion"
+              style={inputStyle}
+            />
+            <div style={dialogActionsStyle}>
+              <button type="button" disabled={deleting} onClick={onCancel} style={secondaryButton}>Cancel</button>
+              <button type="button" disabled={!canDelete} onClick={onDelete} style={{ ...buttonStyle("#b91c1c"), opacity: canDelete ? 1 : 0.45 }}>
+                {deleting ? "Deleting..." : "Permanently Delete"}
+              </button>
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
 }
@@ -1115,7 +1262,72 @@ const archiveCardStyle: React.CSSProperties = {
   border: "1px solid #e5e7eb",
   borderRadius: 8,
   background: "#fff",
+};
+
+const archiveOpenButtonStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  display: "flex",
+  gap: 12,
+  alignItems: "flex-start",
+  padding: 0,
+  border: "none",
+  background: "transparent",
   cursor: "pointer",
+};
+
+const trashButtonStyle: React.CSSProperties = {
+  width: 34,
+  height: 34,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid #fecaca",
+  borderRadius: 6,
+  background: "#fff",
+  color: "#b91c1c",
+  cursor: "pointer",
+  flexShrink: 0,
+};
+
+const dialogBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 50,
+  background: "rgba(17,24,39,0.48)",
+  display: "grid",
+  placeItems: "center",
+  padding: 20,
+};
+
+const dialogStyle: React.CSSProperties = {
+  width: "min(100%, 440px)",
+  borderRadius: 10,
+  border: "1px solid #fecaca",
+  background: "#fff",
+  boxShadow: "0 20px 60px rgba(15,23,42,0.28)",
+  padding: 20,
+  display: "grid",
+  gap: 14,
+};
+
+const dialogTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#991b1b",
+  fontSize: 18,
+};
+
+const dialogCopyStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#374151",
+  fontSize: 14,
+  lineHeight: 1.5,
+};
+
+const dialogActionsStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 8,
+  flexWrap: "wrap",
 };
 
 function tabButtonStyle(active: boolean): React.CSSProperties {
