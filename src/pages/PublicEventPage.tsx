@@ -30,18 +30,6 @@ function fmtSecs(seconds: number) {
   return `${pad2(Math.floor(seconds / 60))}:${pad2(seconds % 60)}`;
 }
 
-function redactUrl(value: string) {
-  if (!value) return "";
-  try {
-    const url = new URL(value);
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return value.split("?")[0]?.split("#")[0] ?? "";
-  }
-}
-
 function hashString(value: string) {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -241,27 +229,22 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [playError, setPlayError] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
-  const durationRef = useRef(0);
-  const playingRef = useRef(false);
-  const pendingResumeRef = useRef(false);
 
-  const getLivePosition = (trackDuration = durationRef.current) => {
-    if (!startsAt || trackDuration <= 0) return 0;
+  const getLivePosition = () => {
+    if (!startsAt || duration <= 0) return 0;
     const startedAt = new Date(startsAt).getTime();
     if (Number.isNaN(startedAt)) return 0;
     const elapsed = Math.max(0, (Date.now() - startedAt) / 1000);
-    return elapsed % trackDuration;
+    return elapsed % duration;
   };
 
   const syncToLive = (force = false) => {
     const audio = audioRef.current;
-    const trackDuration = durationRef.current;
-    if (!audio || trackDuration <= 0) return;
-    const nextPosition = getLivePosition(trackDuration);
+    if (!audio || duration <= 0) return;
+    const nextPosition = getLivePosition();
     const directDrift = Math.abs(audio.currentTime - nextPosition);
-    const loopDrift = trackDuration - directDrift;
+    const loopDrift = duration - directDrift;
     const drift = Math.min(directDrift, loopDrift);
     if (force || drift > 1.5) {
       audio.currentTime = nextPosition;
@@ -269,54 +252,24 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
     setProgress(nextPosition);
   };
 
-  const logPlayFailure = (error: unknown) => {
-    const audio = audioRef.current;
-    console.error("Live audio playback failed", {
-      errorName: error instanceof DOMException ? error.name : error instanceof Error ? error.name : "UnknownError",
-      errorMessage: error instanceof Error ? error.message : String(error),
-      readyState: audio?.readyState,
-      networkState: audio?.networkState,
-      currentSrc: redactUrl(audio?.currentSrc ?? audioUrl),
-      paused: audio?.paused,
-      duration: audio?.duration,
-      targetPosition: getLivePosition(),
-    });
-  };
-
-  const resumeLiveAudio = () => {
-    const audio = audioRef.current;
-    if (!audio || !audioUrl) return;
-
-    setPlayError("");
-    pendingResumeRef.current = true;
-
-    if (durationRef.current > 0) {
-      syncToLive(true);
-    } else {
-      audio.load();
-    }
-
-    audio.play()
-      .then(() => {
-        if (durationRef.current > 0) syncToLive(true);
-      })
-      .catch(error => {
-        pendingResumeRef.current = false;
-        setPlaying(false);
-        playingRef.current = false;
-        setPlayError("tap to resume live audio.");
-        logPlayFailure(error);
-      });
-  };
-
   const toggle = () => {
     const audio = audioRef.current;
     if (!audio || !audioUrl) return;
-    if (playingRef.current) {
+    if (playing) {
       audio.pause();
       return;
     }
-    resumeLiveAudio();
+    syncToLive(true);
+    audio.play().catch(error => {
+      console.error("Live audio playback failed", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorMessage: error instanceof Error ? error.message : String(error),
+        readyState: audio.readyState,
+        networkState: audio.networkState,
+        paused: audio.paused,
+        duration: audio.duration,
+      });
+    });
   };
 
   useEffect(() => {
@@ -324,44 +277,22 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
     if (!audio) return;
 
     const onTime = () => {
-      if (durationRef.current > 0 && !audio.paused) syncToLive(false);
+      if (duration > 0 && !audio.paused) syncToLive(false);
     };
     const onMeta = () => {
-      const nextDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
-      durationRef.current = nextDuration;
+      const nextDuration = audio.duration || 0;
       setDuration(nextDuration);
       if (nextDuration > 0) {
-        setProgress(getLivePosition(nextDuration));
-        if (pendingResumeRef.current || !audio.paused) {
-          syncToLive(true);
-        }
+        const startedAt = startsAt ? new Date(startsAt).getTime() : Number.NaN;
+        const nextProgress = Number.isNaN(startedAt) ? 0 : Math.max(0, ((Date.now() - startedAt) / 1000)) % nextDuration;
+        setProgress(nextProgress);
       }
     };
-    const onPlay = () => {
-      pendingResumeRef.current = false;
-      playingRef.current = true;
-      setPlaying(true);
-      if (durationRef.current > 0) syncToLive(true);
-    };
-    const onPause = () => {
-      playingRef.current = false;
-      setPlaying(false);
-    };
-    const onCanPlay = () => {
-      if (pendingResumeRef.current || playingRef.current) syncToLive(true);
-      else syncToLive(false);
-    };
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onCanPlay = () => syncToLive(false);
     const onVisibility = () => {
       if (!document.hidden) syncToLive(false);
-    };
-    const onError = () => {
-      console.error("Live audio element error", {
-        readyState: audio.readyState,
-        networkState: audio.networkState,
-        currentSrc: redactUrl(audio.currentSrc),
-        errorCode: audio.error?.code,
-        errorMessage: audio.error?.message,
-      });
     };
 
     audio.addEventListener("timeupdate", onTime);
@@ -369,47 +300,33 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
     audio.addEventListener("canplay", onCanPlay);
-    audio.addEventListener("error", onError);
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      audio.pause();
       audio.removeEventListener("timeupdate", onTime);
       audio.removeEventListener("loadedmetadata", onMeta);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
       audio.removeEventListener("canplay", onCanPlay);
-      audio.removeEventListener("error", onError);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [audioUrl, startsAt]);
-
-  useEffect(() => {
-    durationRef.current = 0;
-    playingRef.current = false;
-    pendingResumeRef.current = false;
-    setDuration(0);
-    setProgress(0);
-    setPlaying(false);
-    setPlayError("");
-  }, [audioUrl]);
+  }, [audioUrl, duration, startsAt]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      const trackDuration = durationRef.current;
-      if (trackDuration <= 0) return;
-      const livePosition = getLivePosition(trackDuration);
+      if (duration <= 0) return;
+      const livePosition = getLivePosition();
       setProgress(livePosition);
-      if (playingRef.current) syncToLive(false);
+      if (playing) syncToLive(false);
     }, 500);
     return () => window.clearInterval(id);
-  }, [startsAt]);
+  }, [duration, playing, startsAt]);
 
   const pct = duration > 0 ? (progress / duration) * 100 : 0;
 
   return (
     <div style={{ width: "100%", minWidth: "4.5rem" }}>
-      {audioUrl && <audio ref={audioRef} src={audioUrl} loop playsInline preload="metadata" />}
+      {audioUrl && <audio ref={audioRef} src={audioUrl} loop playsInline />}
       <div style={{ display: "flex", alignItems: "center", gap: "clamp(0.25rem, 1.2vw, 0.7rem)", minWidth: 0 }}>
         <button
           type="button"
@@ -434,7 +351,6 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
             zIndex: 2,
             touchAction: "manipulation",
           }}
-          title={playError || undefined}
         >
           {playing ? "■" : "▶"}
         </button>
