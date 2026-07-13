@@ -346,9 +346,6 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
         >
           <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${pct}%`, background: GREEN, transition: "width 0.4s linear" }} />
         </div>
-        <span style={{ fontFamily: VT, fontSize: "clamp(0.9rem, 2.9vw, 1.2rem)", color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
-          {fmtSecs(Math.floor(progress))}
-        </span>
       </div>
     </div>
   );
@@ -396,7 +393,7 @@ function CompactLiveCountdown({ target }: { target: string | null }) {
         textAlign: "right",
       }}
     >
-      ends {label}
+      live ends {label}
     </span>
   );
 }

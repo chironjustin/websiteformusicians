@@ -142,8 +142,8 @@ export async function updateMessageFlags(id: string, flags: Partial<Pick<ChatMes
 
 export async function setMessagePinned(id: string, pinned: boolean) {
   const { error } = await supabase.rpc("set_chat_message_pin", {
-    message_id: id,
-    pinned,
+    p_message_id: id,
+    p_pinned: pinned,
   });
 
   if (error) throw new Error(error.message);
@@ -151,8 +151,8 @@ export async function setMessagePinned(id: string, pinned: boolean) {
 
 export async function setMessageHighlighted(id: string, highlighted: boolean) {
   const { error } = await supabase.rpc("set_chat_message_highlight", {
-    message_id: id,
-    highlighted,
+    p_message_id: id,
+    p_highlighted: highlighted,
   });
 
   if (error) throw new Error(error.message);

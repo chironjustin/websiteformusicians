@@ -27,6 +27,50 @@ create index if not exists chat_messages_event_pinned_created_idx on public.chat
 create index if not exists chat_messages_event_client_token_idx on public.chat_messages(event_id, client_token) where client_token is not null;
 create index if not exists chat_messages_created_at_idx on public.chat_messages(created_at);
 
+with ranked_pins as (
+  select
+    id,
+    row_number() over (
+      partition by event_id
+      order by updated_at desc, created_at desc, id desc
+    ) as row_number
+  from public.chat_messages
+  where event_id is not null
+    and is_pinned = true
+)
+update public.chat_messages
+set is_pinned = false
+where id in (
+  select id from ranked_pins where row_number > 1
+);
+
+with ranked_highlights as (
+  select
+    id,
+    row_number() over (
+      partition by event_id
+      order by updated_at desc, created_at desc, id desc
+    ) as row_number
+  from public.chat_messages
+  where event_id is not null
+    and is_highlighted = true
+)
+update public.chat_messages
+set is_highlighted = false
+where id in (
+  select id from ranked_highlights where row_number > 1
+);
+
+create unique index if not exists chat_messages_one_pinned_per_event_idx
+on public.chat_messages(event_id)
+where event_id is not null
+  and is_pinned = true;
+
+create unique index if not exists chat_messages_one_highlighted_per_event_idx
+on public.chat_messages(event_id)
+where event_id is not null
+  and is_highlighted = true;
+
 drop trigger if exists set_chat_messages_updated_at on public.chat_messages;
 create trigger set_chat_messages_updated_at
 before update on public.chat_messages
@@ -89,8 +133,8 @@ revoke all on function public.get_visitor_chat_message_status(uuid, uuid, uuid) 
 grant execute on function public.get_visitor_chat_message_status(uuid, uuid, uuid) to anon, authenticated;
 
 create or replace function public.set_chat_message_pin(
-  message_id uuid,
-  pinned boolean
+  p_message_id uuid,
+  p_pinned boolean
 )
 returns void
 language plpgsql
@@ -104,7 +148,7 @@ begin
   into target_event_id
   from public.chat_messages
   join public.events on events.id = chat_messages.event_id
-  where chat_messages.id = message_id
+  where chat_messages.id = p_message_id
     and events.owner_id = auth.uid();
 
   if target_event_id is null then
@@ -113,17 +157,17 @@ begin
 
   perform pg_advisory_xact_lock(hashtext(target_event_id::text));
 
-  if pinned then
+  if p_pinned then
     update public.chat_messages
     set is_pinned = false
     where event_id = target_event_id
-      and id <> message_id
+      and id <> p_message_id
       and is_pinned = true;
   end if;
 
   update public.chat_messages
-  set is_pinned = pinned
-  where id = message_id
+  set is_pinned = p_pinned
+  where id = p_message_id
     and event_id = target_event_id;
 end;
 $$;
@@ -132,8 +176,8 @@ revoke all on function public.set_chat_message_pin(uuid, boolean) from public;
 grant execute on function public.set_chat_message_pin(uuid, boolean) to authenticated;
 
 create or replace function public.set_chat_message_highlight(
-  message_id uuid,
-  highlighted boolean
+  p_message_id uuid,
+  p_highlighted boolean
 )
 returns void
 language plpgsql
@@ -147,7 +191,7 @@ begin
   into target_event_id
   from public.chat_messages
   join public.events on events.id = chat_messages.event_id
-  where chat_messages.id = message_id
+  where chat_messages.id = p_message_id
     and events.owner_id = auth.uid();
 
   if target_event_id is null then
@@ -156,17 +200,17 @@ begin
 
   perform pg_advisory_xact_lock(hashtext(target_event_id::text));
 
-  if highlighted then
+  if p_highlighted then
     update public.chat_messages
     set is_highlighted = false
     where event_id = target_event_id
-      and id <> message_id
+      and id <> p_message_id
       and is_highlighted = true;
   end if;
 
   update public.chat_messages
-  set is_highlighted = highlighted
-  where id = message_id
+  set is_highlighted = p_highlighted
+  where id = p_message_id
     and event_id = target_event_id;
 end;
 $$;
@@ -259,3 +303,5 @@ using (
 
 -- Optional but recommended for realtime subscriptions:
 -- alter publication supabase_realtime add table public.chat_messages;
+
+notify pgrst, 'reload schema';
