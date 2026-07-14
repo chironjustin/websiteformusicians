@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import type { CreateEventInput, MusicEvent, UpdateEventInput } from "@/types/event";
 
 const PUBLIC_STATUSES = ["upcoming", "live", "finished"];
+type PublicSelectionReason = "live" | "upcoming" | "finished";
 
 function toUsefulError(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error;
@@ -36,16 +37,62 @@ async function requireUserId() {
 }
 
 export async function getCurrentPublicEvent() {
-  const { data, error } = await supabase
+  const now = new Date().toISOString();
+
+  const live = await selectCurrentPublicEventByReason("live", now);
+  if (live) return live;
+
+  const upcoming = await selectCurrentPublicEventByReason("upcoming", now);
+  if (upcoming) return upcoming;
+
+  return selectCurrentPublicEventByReason("finished", now);
+}
+
+async function selectCurrentPublicEventByReason(reason: PublicSelectionReason, now: string) {
+  const query = supabase
     .from("events")
     .select("*")
-    .in("status", PUBLIC_STATUSES)
-    .order("starts_at", { ascending: false, nullsFirst: false })
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<MusicEvent>();
+    .in("status", PUBLIC_STATUSES);
+
+  const orderedQuery = reason === "live"
+    ? query
+      .not("starts_at", "is", null)
+      .not("ends_at", "is", null)
+      .not("audio_path", "is", null)
+      .lte("starts_at", now)
+      .gt("ends_at", now)
+      .in("status", ["upcoming", "live"])
+      .order("starts_at", { ascending: false, nullsFirst: false })
+      .order("updated_at", { ascending: false })
+    : reason === "upcoming"
+      ? query
+        .not("starts_at", "is", null)
+        .not("audio_path", "is", null)
+        .gt("starts_at", now)
+        .eq("status", "upcoming")
+        .order("starts_at", { ascending: true, nullsFirst: false })
+        .order("updated_at", { ascending: false })
+      : query
+        .not("ends_at", "is", null)
+        .lte("ends_at", now)
+        .in("status", ["upcoming", "live", "finished"])
+        .order("ends_at", { ascending: false, nullsFirst: false })
+        .order("updated_at", { ascending: false });
+
+  const { data, error } = await orderedQuery.limit(1).maybeSingle<MusicEvent>();
 
   if (error) throw toUsefulError(error, "Unable to load the current event.");
+  if (data) {
+    console.info("Selected public event", {
+      selectionReason: reason,
+      eventId: data.id,
+      title: data.title,
+      status: data.status,
+      startsAt: data.starts_at,
+      endsAt: data.ends_at,
+      audioPathPresent: Boolean(data.audio_path),
+    });
+  }
   return data;
 }
 

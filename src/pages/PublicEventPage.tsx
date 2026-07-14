@@ -1044,6 +1044,16 @@ export default function PublicEventPage() {
 
   const title = event.title.toLowerCase();
   const countdownTarget = getCountdownTarget(event, state);
+  const currentAudioPipelineDiagnostics: AudioUrlPipelineDiagnostics = {
+    ...audioPipelineDiagnostics,
+    eventId: event.id,
+    eventStatus: event.status,
+    state,
+    audioPath: event.audio_path,
+    audioPathPresent: Boolean(event.audio_path),
+    finalAudioUrlPresent: Boolean(audioUrl),
+    sourceIdentity: getAudioSourceIdentity(event.id, event.audio_path),
+  };
 
   return (
     <Shell>
@@ -1057,7 +1067,7 @@ export default function PublicEventPage() {
           artistUrl={images.artist}
           audioUrl={audioUrl}
           audioSourceStatus={audioSourceStatus}
-          audioPipelineDiagnostics={audioPipelineDiagnostics}
+          audioPipelineDiagnostics={currentAudioPipelineDiagnostics}
           startsAt={event.starts_at}
           liveTarget={countdownTarget}
           eventId={event.id}
