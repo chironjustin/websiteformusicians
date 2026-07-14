@@ -48,6 +48,10 @@ function getErrorLogInfo(error: unknown) {
   };
 }
 
+function logAudioUrlPipeline(message: string, details: Record<string, unknown>) {
+  console.info(`[audio-url-pipeline] ${message}`, details);
+}
+
 function hashString(value: string) {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -701,16 +705,35 @@ export default function PublicEventPage() {
 
   useEffect(() => {
     let active = true;
+    logAudioUrlPipeline("effect runs", {
+      eventId: event?.id ?? null,
+      eventStatus: event?.status ?? null,
+      state,
+      audioPath: event?.audio_path ?? null,
+      hasAudioPath: Boolean(event?.audio_path),
+    });
     setAudioUrl("");
     setAudioSourceStatus("idle");
 
     if (state !== "live") {
+      logAudioUrlPipeline("effect exits before signing because state is not live", {
+        eventId: event?.id ?? null,
+        eventStatus: event?.status ?? null,
+        state,
+        audioPath: event?.audio_path ?? null,
+      });
       return () => {
         active = false;
       };
     }
 
     if (!event?.audio_path) {
+      logAudioUrlPipeline("effect exits before signing because audio_path is missing", {
+        eventId: event?.id ?? null,
+        eventStatus: event?.status ?? null,
+        state,
+        audioPath: event?.audio_path ?? null,
+      });
       console.error("Live audio source unavailable", {
         eventId: event?.id ?? null,
         hasAudioPath: false,
@@ -722,6 +745,12 @@ export default function PublicEventPage() {
     }
 
     setAudioSourceStatus("loading");
+    logAudioUrlPipeline("getSignedAudioUrl called", {
+      eventId: event.id,
+      eventStatus: event.status,
+      state,
+      audioPath: event.audio_path,
+    });
     console.info("Requesting live audio signed URL", {
       eventId: event.id,
       hasAudioPath: true,
@@ -729,7 +758,25 @@ export default function PublicEventPage() {
 
     getSignedAudioUrl(event?.audio_path)
       .then(url => {
-        if (!active) return;
+        logAudioUrlPipeline("getSignedAudioUrl resolved", {
+          eventId: event.id,
+          eventStatus: event.status,
+          state,
+          audioPath: event.audio_path,
+          resolvedAudioUrlPresent: Boolean(url),
+          resolvedAudioUrlPath: sanitizeUrlForLog(url),
+          effectStillActive: active,
+        });
+        if (!active) {
+          logAudioUrlPipeline("setAudioUrl skipped because effect is inactive", {
+            eventId: event.id,
+            eventStatus: event.status,
+            state,
+            audioPath: event.audio_path,
+            resolvedAudioUrlPresent: Boolean(url),
+          });
+          return;
+        }
         if (!url) {
           setAudioSourceStatus("error");
           console.error("Live audio signed URL failed", {
@@ -740,6 +787,14 @@ export default function PublicEventPage() {
           });
           return;
         }
+        logAudioUrlPipeline("setAudioUrl executes", {
+          eventId: event.id,
+          eventStatus: event.status,
+          state,
+          audioPath: event.audio_path,
+          nextAudioUrlPresent: true,
+          nextAudioUrlPath: sanitizeUrlForLog(url),
+        });
         setAudioUrl(url);
         setAudioSourceStatus("ready");
         console.info("Live audio signed URL ready", {
@@ -750,6 +805,14 @@ export default function PublicEventPage() {
         });
       })
       .catch(err => {
+        logAudioUrlPipeline("getSignedAudioUrl rejects", {
+          eventId: event.id,
+          eventStatus: event.status,
+          state,
+          audioPath: event.audio_path,
+          ...getErrorLogInfo(err),
+          effectStillActive: active,
+        });
         console.error("Live audio signed URL failed", {
           eventId: event.id,
           hasAudioPath: true,
@@ -762,6 +825,17 @@ export default function PublicEventPage() {
       active = false;
     };
   }, [event?.audio_path, event?.id, state]);
+
+  useEffect(() => {
+    logAudioUrlPipeline("audioUrl state changed", {
+      eventId: event?.id ?? null,
+      eventStatus: event?.status ?? null,
+      state,
+      audioPath: event?.audio_path ?? null,
+      finalAudioUrlPresent: Boolean(audioUrl),
+      finalAudioUrlPath: sanitizeUrlForLog(audioUrl),
+    });
+  }, [audioUrl, event?.audio_path, event?.id, event?.status, state]);
 
   const images = useMemo(() => ({
     artwork: getPublicImageUrl("artwork", event?.artwork_path),
