@@ -31,6 +31,31 @@ function normalizeObjectPath(bucket: Bucket, path: string | null | undefined) {
   return trimmed.replace(/^\/+/, "");
 }
 
+export function getStoragePathInfo(bucket: Bucket, path: string | null | undefined) {
+  const objectPath = normalizeObjectPath(bucket, path);
+  if (!objectPath) return null;
+  const parts = objectPath.split("/").filter(Boolean);
+  const basename = parts.at(-1) ?? "";
+  const parentFolder = parts.slice(0, -1).join("/");
+  return {
+    bucket,
+    path: objectPath,
+    ownerId: parts[0] ?? "",
+    eventId: parts[1] ?? "",
+    parentFolder,
+    basename,
+  };
+}
+
+export function assertStoragePathBelongsToEvent(bucket: Bucket, path: string | null | undefined, eventId: string) {
+  const info = getStoragePathInfo(bucket, path);
+  if (!info) throw new Error(`Missing ${bucket} storage path.`);
+  if (info.eventId !== eventId) {
+    throw new Error(`Uploaded ${bucket} file belongs to event ${info.eventId || "unknown"}, not the current event ${eventId}.`);
+  }
+  return info;
+}
+
 function validateFile(file: File, kind: "image" | "audio") {
   const allowed = kind === "image" ? IMAGE_TYPES : AUDIO_TYPES;
   const maxSize = kind === "image" ? MAX_IMAGE_BYTES : MAX_AUDIO_BYTES;
@@ -71,6 +96,18 @@ export function uploadAudio(eventId: string, file: File) {
 export async function removeFile(bucket: Bucket, path: string) {
   const { error } = await supabase.storage.from(bucket).remove([path]);
   if (error) throw new Error(error.message);
+}
+
+export async function verifyStorageObjectExists(bucket: Bucket, path: string | null | undefined) {
+  const info = getStoragePathInfo(bucket, path);
+  if (!info) return false;
+  if (!info.parentFolder || !info.basename) return false;
+  const { data, error } = await supabase.storage.from(bucket).list(info.parentFolder, {
+    search: info.basename,
+    limit: 100,
+  });
+  if (error) throw new Error(error.message);
+  return (data ?? []).some(item => item.name === info.basename);
 }
 
 export function getPublicImageUrl(bucket: Exclude<Bucket, "audio">, path: string | null | undefined) {

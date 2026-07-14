@@ -1,11 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Radio, Trash2 } from "lucide-react";
 import { dateTimeLocalToUtc, formatDateTimeLocal } from "@/lib/datetime";
 import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
 import { deleteChatMessage, getAdminChatMessages, sendAdminMessage, setMessageHighlighted, setMessagePinned, setMessageStatus, updateMessageFlags } from "@/services/chatService";
 import { createEvent, deleteArchivedEvent, endEvent, getAdminEvents, startEvent, updateEvent } from "@/services/eventService";
-import { getPublicImageUrl, getSignedAudioUrl, uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage } from "@/services/storageService";
+import { assertStoragePathBelongsToEvent, getPublicImageUrl, getSignedAudioUrl, uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage, verifyStorageObjectExists } from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
 import type { MusicEvent, UpdateEventInput } from "@/types/event";
 import FilePicker from "@/components/admin/FilePicker";
@@ -29,6 +29,20 @@ type PendingFiles = {
   merchImage: File | null;
   audio: File | null;
 };
+
+type UploadedMediaResult = {
+  updates: UpdateEventInput;
+  uploadedKeys: Array<keyof PendingFiles>;
+};
+
+const MEDIA_PATH_FIELDS = ["audio_path", "artwork_path", "artist_image_path", "merch_image_path"] as const;
+
+const MEDIA_FIELD_TO_BUCKET = {
+  audio_path: "audio",
+  artwork_path: "artwork",
+  artist_image_path: "artist-images",
+  merch_image_path: "merch-images",
+} as const;
 
 type ChatCounts = {
   total: number;
@@ -73,6 +87,8 @@ export default function AdminPage() {
   const [audioPreviewAttempt, setAudioPreviewAttempt] = useState(0);
   const [artistImageWarning, setArtistImageWarning] = useState("");
   const [activeTab, setActiveTab] = useState<AdminTab>("event");
+  const mutationInFlight = useRef(false);
+  const mutationIdRef = useRef(0);
   const currentChatEvent = event && isActiveChatEvent(event) ? event : null;
   const currentEventId = currentChatEvent?.id ?? null;
   const chat = useEventChat(currentEventId, "admin");
@@ -175,34 +191,58 @@ export default function AdminPage() {
     return created;
   }
 
-  async function uploadPendingFiles(baseEvent: MusicEvent) {
+  function logAdminMutation(mutationId: number, action: string, details: Record<string, unknown>) {
+    console.info("[admin-event-mutation]", {
+      mutationId,
+      action,
+      ...details,
+    });
+  }
+
+  function pendingFileNames() {
+    return {
+      audio: pendingFiles.audio?.name ?? null,
+      artwork: pendingFiles.artwork?.name ?? null,
+      artistImage: pendingFiles.artistImage?.name ?? null,
+      merchImage: pendingFiles.merchImage?.name ?? null,
+    };
+  }
+
+  async function uploadPendingFiles(baseEvent: MusicEvent, mutationId: number): Promise<UploadedMediaResult> {
     const updates: UpdateEventInput = {};
-    const nextFiles = { ...pendingFiles };
+    const uploadedKeys: Array<keyof PendingFiles> = [];
 
     if (pendingFiles.audio) {
       setUploadStatus("Uploading audio...");
       updates.audio_path = await uploadAudio(baseEvent.id, pendingFiles.audio);
-      nextFiles.audio = null;
+      assertStoragePathBelongsToEvent("audio", updates.audio_path, baseEvent.id);
+      uploadedKeys.push("audio");
     }
     if (pendingFiles.artwork) {
       setUploadStatus("Uploading artwork...");
       updates.artwork_path = await uploadArtwork(baseEvent.id, pendingFiles.artwork);
-      nextFiles.artwork = null;
+      assertStoragePathBelongsToEvent("artwork", updates.artwork_path, baseEvent.id);
+      uploadedKeys.push("artwork");
     }
     if (pendingFiles.artistImage) {
       setUploadStatus("Uploading artist image...");
       updates.artist_image_path = await uploadArtistImage(baseEvent.id, pendingFiles.artistImage);
-      nextFiles.artistImage = null;
+      assertStoragePathBelongsToEvent("artist-images", updates.artist_image_path, baseEvent.id);
+      uploadedKeys.push("artistImage");
     }
     if (pendingFiles.merchImage) {
       setUploadStatus("Uploading merch image...");
       updates.merch_image_path = await uploadMerchImage(baseEvent.id, pendingFiles.merchImage);
-      nextFiles.merchImage = null;
+      assertStoragePathBelongsToEvent("merch-images", updates.merch_image_path, baseEvent.id);
+      uploadedKeys.push("merchImage");
     }
 
-    setPendingFiles(nextFiles);
+    logAdminMutation(mutationId, "upload-complete", {
+      eventId: baseEvent.id,
+      uploadedPaths: Object.fromEntries(MEDIA_PATH_FIELDS.filter(field => updates[field]).map(field => [field, updates[field]])),
+    });
     setUploadStatus("");
-    return updates;
+    return { updates, uploadedKeys };
   }
 
   function validateUrls() {
@@ -244,24 +284,108 @@ export default function AdminPage() {
     };
   }
 
-  async function runAction(label: string, action: (baseEvent: MusicEvent, updates: UpdateEventInput) => Promise<MusicEvent>) {
+  function verifyReturnedMediaPaths(expectedEventId: string, saved: MusicEvent, uploadedUpdates: UpdateEventInput) {
+    if (saved.id !== expectedEventId) {
+      throw new Error(`Saved event ID ${saved.id} did not match expected event ${expectedEventId}.`);
+    }
+
+    for (const field of MEDIA_PATH_FIELDS) {
+      const expectedPath = uploadedUpdates[field];
+      if (!expectedPath) continue;
+      if (saved[field] !== expectedPath) {
+        throw new Error(`Saved ${field} did not match the uploaded file path. Please save again before starting.`);
+      }
+      assertStoragePathBelongsToEvent(MEDIA_FIELD_TO_BUCKET[field], saved[field], expectedEventId);
+    }
+  }
+
+  function clearConfirmedPendingFiles(uploadedKeys: Array<keyof PendingFiles>) {
+    if (uploadedKeys.length === 0) return;
+    setPendingFiles(current => ({
+      ...current,
+      ...Object.fromEntries(uploadedKeys.map(key => [key, null])),
+    }));
+  }
+
+  async function verifyRequiredMediaBeforePublish(saved: MusicEvent) {
+    if (!saved.audio_path) {
+      throw new Error("Upload audio before starting.");
+    }
+
+    assertStoragePathBelongsToEvent("audio", saved.audio_path, saved.id);
+    const audioExists = await verifyStorageObjectExists("audio", saved.audio_path);
+    if (!audioExists) {
+      throw new Error("Uploaded audio could not be verified. Please upload it again.");
+    }
+
+    const requiredVisualPath = saved.artwork_path || saved.artist_image_path;
+    if (!requiredVisualPath) {
+      throw new Error("Upload artwork or an artist image before starting.");
+    }
+
+    if (saved.artwork_path) {
+      assertStoragePathBelongsToEvent("artwork", saved.artwork_path, saved.id);
+      const artworkExists = await verifyStorageObjectExists("artwork", saved.artwork_path);
+      if (!artworkExists) throw new Error("Uploaded artwork could not be verified. Please upload it again.");
+    }
+
+    if (saved.artist_image_path) {
+      assertStoragePathBelongsToEvent("artist-images", saved.artist_image_path, saved.id);
+      const artistImageExists = await verifyStorageObjectExists("artist-images", saved.artist_image_path);
+      if (!artistImageExists) throw new Error("Uploaded artist image could not be verified. Please upload it again.");
+    }
+
+    if (saved.merch_image_path) {
+      assertStoragePathBelongsToEvent("merch-images", saved.merch_image_path, saved.id);
+      const merchImageExists = await verifyStorageObjectExists("merch-images", saved.merch_image_path);
+      if (!merchImageExists) throw new Error("Uploaded merch image could not be verified. Please upload it again.");
+    }
+  }
+
+  async function runAction(label: string, action: (baseEvent: MusicEvent, updates: UpdateEventInput, mutationId: number) => Promise<MusicEvent>) {
+    if (mutationInFlight.current) {
+      setError("Another event update is still saving. Please wait.");
+      return;
+    }
+    const mutationId = mutationIdRef.current + 1;
+    mutationIdRef.current = mutationId;
+    mutationInFlight.current = true;
     setBusy(true);
     setError("");
     setMessage("");
     try {
+      logAdminMutation(mutationId, "start", {
+        pendingFiles: pendingFileNames(),
+        currentEventId: event?.id ?? null,
+      });
       validateUrls();
       validateEventWindow();
       const baseEvent = await ensureEvent();
-      const uploadUpdates = await uploadPendingFiles(baseEvent);
+      logAdminMutation(mutationId, "event-ready", { eventId: baseEvent.id });
+      const { updates: uploadUpdates, uploadedKeys } = await uploadPendingFiles(baseEvent, mutationId);
       const latest = toUpdateInput(uploadUpdates);
-      const saved = await action(baseEvent, latest);
+      logAdminMutation(mutationId, "update-payload-ready", {
+        eventId: baseEvent.id,
+        mediaKeys: MEDIA_PATH_FIELDS.filter(field => latest[field]),
+      });
+      const saved = await action(baseEvent, latest, mutationId);
+      verifyReturnedMediaPaths(baseEvent.id, saved, uploadUpdates);
+      logAdminMutation(mutationId, "saved-row-verified", {
+        eventId: saved.id,
+        returnedPaths: Object.fromEntries(MEDIA_PATH_FIELDS.map(field => [field, saved[field]])),
+      });
+      if (mutationId !== mutationIdRef.current) {
+        throw new Error("A newer event update finished first. Please refresh and try again.");
+      }
       syncSavedEvent(saved);
+      clearConfirmedPendingFiles(uploadedKeys);
       setMessage(label);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setUploadStatus("");
       setBusy(false);
+      mutationInFlight.current = false;
     }
   }
 
@@ -277,7 +401,30 @@ export default function AdminPage() {
     }
     await runAction(
       `Event started from ${formatAdminDateTime(form.starts_at)} to ${formatAdminDateTime(form.ends_at)}.`,
-      async (baseEvent, updates) => startEvent(baseEvent.id, updates),
+      async (baseEvent, updates, mutationId) => {
+        logAdminMutation(mutationId, "persist-before-start", {
+          eventId: baseEvent.id,
+          mediaKeys: MEDIA_PATH_FIELDS.filter(field => updates[field]),
+        });
+        const savedDraft = await updateEvent(baseEvent.id, updates);
+        verifyReturnedMediaPaths(baseEvent.id, savedDraft, updates);
+        logAdminMutation(mutationId, "verify-storage-before-start", {
+          eventId: savedDraft.id,
+          audioPath: savedDraft.audio_path,
+          artworkPath: savedDraft.artwork_path,
+          artistImagePath: savedDraft.artist_image_path,
+          merchImagePath: savedDraft.merch_image_path,
+        });
+        await verifyRequiredMediaBeforePublish(savedDraft);
+        const started = await startEvent(savedDraft.id);
+        await verifyRequiredMediaBeforePublish(started);
+        logAdminMutation(mutationId, "status-update-complete", {
+          eventId: started.id,
+          status: started.status,
+          audioPath: started.audio_path,
+        });
+        return started;
+      },
     );
   }
 
