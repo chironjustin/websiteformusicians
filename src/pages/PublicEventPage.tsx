@@ -2,7 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemainingMilliseconds } from "@/lib/eventTiming";
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
-import { getVisitorMessageStatus, sendVisitorMessage } from "@/services/chatService";
+import {
+  CHAT_NAME_LENGTH_MESSAGE,
+  CHAT_NAME_TAKEN_MESSAGE,
+  USER_AVATAR_IDS,
+  isUserAvatarId,
+  normalizeChatName,
+  reserveEventChatIdentity,
+  sendVisitorMessage,
+  getVisitorMessageStatus,
+} from "@/services/chatService";
 import {
   getAudioObjectPath,
   getPublicImageUrl,
@@ -54,7 +63,14 @@ type AudioUrlPipelineDiagnostics = {
 
 const CHAT_NAME_KEY_PREFIX = "music-event-chat-name:";
 const CHAT_AVATAR_KEY_PREFIX = "music-event-chat-avatar:";
+const CHAT_PARTICIPANT_KEY_PREFIX = "music-event-chat-participant:";
 const LEGACY_CHAT_IDENTITY_KEYS = ["live-chat-name", "chat-name", "username", "joined-chat"];
+
+type JoinedChatIdentity = {
+  participantId: string;
+  displayName: string;
+  avatarId: string;
+};
 
 function pad2(value: number) {
   return String(Math.floor(value)).padStart(2, "0");
@@ -89,29 +105,21 @@ function logAudioUrlPipeline(message: string, details: Record<string, unknown>) 
   console.info(`[audio-url-pipeline] ${message}`, details);
 }
 
-function hashString(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function seededValue(seed: number, offset: number) {
-  const value = Math.sin(seed + offset * 999) * 10000;
-  return value - Math.floor(value);
-}
-
-function createRetroAvatar(eventId: string, name: string) {
-  const normalizedName = name.replace(/\s+/g, " ").trim().toLowerCase();
-  const seed = hashString(`${eventId}:${normalizedName || "guest"}`);
-  const hue = Math.floor(seededValue(seed, 1) * 95) + 95;
-  const accentHue = Math.floor(seededValue(seed, 2) * 60) + 180;
-  const skin = `hsl(${hue}, 56%, 42%)`;
-  const accent = `hsl(${accentHue}, 62%, 54%)`;
-  const face = seededValue(seed, 3) > 0.5 ? "round" : "square";
-  const visor = seededValue(seed, 4) > 0.55;
+function createRetroAvatar(avatarId: string) {
+  const index = Math.max(0, USER_AVATAR_IDS.indexOf(avatarId as typeof USER_AVATAR_IDS[number]));
+  const palette = [
+    ["#53B6A6", "#4651B8"],
+    ["#8BD450", "#313E9B"],
+    ["#F0A04B", "#4B2FA3"],
+    ["#D35F8D", "#225E78"],
+    ["#58A6FF", "#7A3FA3"],
+    ["#D6D65C", "#2F6B4F"],
+    ["#A171FF", "#1F7F6D"],
+    ["#74C69D", "#5C3B9E"],
+  ][index] ?? ["#53B6A6", "#4651B8"];
+  const [skin, accent] = palette;
+  const face = index % 2 === 0 ? "round" : "square";
+  const visor = index === 2 || index === 5;
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" shape-rendering="crispEdges">
   <rect width="48" height="48" fill="#050505"/>
@@ -713,7 +721,38 @@ function getEventChatNameKey(eventId: string) {
   return `${CHAT_NAME_KEY_PREFIX}${eventId}`;
 }
 
+function getEventChatParticipantKey(eventId: string) {
+  return `${CHAT_PARTICIPANT_KEY_PREFIX}${eventId}`;
+}
+
+function readStoredChatIdentity(eventId: string): JoinedChatIdentity | null {
+  const participantValue = window.localStorage.getItem(getEventChatParticipantKey(eventId));
+  if (participantValue) {
+    try {
+      const parsed = JSON.parse(participantValue) as Partial<JoinedChatIdentity>;
+      if (parsed.participantId && parsed.displayName && isUserAvatarId(parsed.avatarId)) {
+        return {
+          participantId: parsed.participantId,
+          displayName: parsed.displayName,
+          avatarId: parsed.avatarId,
+        };
+      }
+    } catch {
+      window.localStorage.removeItem(getEventChatParticipantKey(eventId));
+    }
+  }
+
+  return null;
+}
+
+function storeChatIdentity(eventId: string, identity: JoinedChatIdentity) {
+  window.localStorage.setItem(getEventChatParticipantKey(eventId), JSON.stringify(identity));
+  window.localStorage.setItem(getEventChatNameKey(eventId), identity.displayName);
+  window.localStorage.setItem(`${CHAT_AVATAR_KEY_PREFIX}${eventId}`, identity.avatarId);
+}
+
 function removeEventChatIdentity(eventId: string) {
+  window.localStorage.removeItem(getEventChatParticipantKey(eventId));
   window.localStorage.removeItem(getEventChatNameKey(eventId));
   window.localStorage.removeItem(`${CHAT_AVATAR_KEY_PREFIX}${eventId}`);
 }
@@ -1499,40 +1538,39 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
 }
 
 function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
-  const joinedNameKey = getEventChatNameKey(eventId);
-  const [joinedName, setJoinedName] = useState("");
+  const [joinedIdentity, setJoinedIdentity] = useState<JoinedChatIdentity | null>(null);
 
   useEffect(() => {
-    setJoinedName(window.localStorage.getItem(joinedNameKey) ?? "");
-  }, [joinedNameKey]);
+    setJoinedIdentity(readStoredChatIdentity(eventId));
+  }, [eventId]);
 
   useEffect(() => {
     console.info("[live-chat-join-state]", {
       eventId,
-      joined: Boolean(joinedName),
+      joined: Boolean(joinedIdentity),
       sourceIdentity: audioPipelineDiagnostics.sourceIdentity,
       audioPathPresent: audioPipelineDiagnostics.audioPathPresent,
       finalAudioUrlPresent: audioPipelineDiagnostics.finalAudioUrlPresent,
       signingRequest: audioPipelineDiagnostics.signingRequest,
     });
-  }, [audioPipelineDiagnostics.audioPathPresent, audioPipelineDiagnostics.finalAudioUrlPresent, audioPipelineDiagnostics.signingRequest, audioPipelineDiagnostics.sourceIdentity, eventId, joinedName]);
+  }, [audioPipelineDiagnostics.audioPathPresent, audioPipelineDiagnostics.finalAudioUrlPresent, audioPipelineDiagnostics.signingRequest, audioPipelineDiagnostics.sourceIdentity, eventId, joinedIdentity]);
 
   return (
     <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", padding: "2.2rem 1.75rem 1.25rem" }}>
       <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
         <LiveAudioHeader title={title} audioUrl={audioUrl} audioSourceStatus={audioSourceStatus} audioPipelineDiagnostics={audioPipelineDiagnostics} startsAt={startsAt} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
-        <LiveMessageStream messages={messages} joined={Boolean(joinedName)} eventId={eventId} artistName={artistName} artistUrl={artistUrl} />
+        <LiveMessageStream messages={messages} joined={Boolean(joinedIdentity)} eventId={eventId} artistName={artistName} artistUrl={artistUrl} />
         <BouncingArtistPortrait imageUrl={artistUrl} />
         {starting && (
           <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
             event is starting...
           </p>
         )}
-        {joinedName ? (
-          <ActiveChatComposer eventId={eventId} displayName={joinedName} live={live} starting={starting} />
+        {joinedIdentity ? (
+          <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} />
         ) : (
-          <JoinChatPanel eventId={eventId} storageKey={joinedNameKey} onJoin={setJoinedName} />
+          <JoinChatPanel eventId={eventId} artistName={artistName} onJoin={setJoinedIdentity} />
         )}
       </div>
     </div>
@@ -1605,7 +1643,7 @@ function ChatMessageBubble({ message, joined, eventId, artistName, artistUrl, pi
     }}>
       {message.is_admin
         ? <ArtistMessageAvatar artistUrl={artistUrl} />
-        : <ChatAvatar eventId={eventId} name={message.display_name} />}
+        : <ChatAvatar avatarId={message.avatar_id} />}
       <div style={{ minWidth: 0 }}>
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em", overflowWrap: "anywhere" }}>
           {displayName}{labels.length > 0 ? ` ${labels.join(" ")}` : ""}
@@ -1644,10 +1682,12 @@ function ArtistLikeIndicator({ artistUrl }: { artistUrl: string }) {
   );
 }
 
-function ChatAvatar({ eventId, name }: { eventId: string; name: string }) {
+function ChatAvatar({ avatarId }: { avatarId: string | null | undefined }) {
+  const safeAvatarId = isUserAvatarId(avatarId) ? avatarId : USER_AVATAR_IDS[0];
+
   return (
     <img
-      src={createRetroAvatar(eventId, name)}
+      src={createRetroAvatar(safeAvatarId)}
       alt=""
       aria-hidden="true"
       style={{
@@ -1683,24 +1723,44 @@ function ArtistMessageAvatar({ artistUrl }: { artistUrl: string }) {
   );
 }
 
-function JoinChatPanel({ eventId, storageKey, onJoin }: { eventId: string; storageKey: string; onJoin: (name: string) => void }) {
+function JoinChatPanel({ eventId, artistName, onJoin }: { eventId: string; artistName: string; onJoin: (identity: JoinedChatIdentity) => void }) {
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
+  const [joining, setJoining] = useState(false);
 
-  function join(event: React.FormEvent) {
+  async function join(event: React.FormEvent) {
     event.preventDefault();
-    const name = displayName.replace(/\s+/g, " ").trim().slice(0, 50);
-    if (!name) {
-      setError("choose a name first.");
+    const name = displayName.replace(/\s+/g, " ").trim();
+    if (!name || name.length > 16) {
+      setError(CHAT_NAME_LENGTH_MESSAGE);
       return;
     }
-    window.localStorage.setItem(storageKey, name);
-    console.info("[live-chat-join-state]", {
-      eventId,
-      joined: true,
-      action: "join-submitted",
-    });
-    onJoin(name);
+    if (normalizeChatName(name) === normalizeChatName(artistName)) {
+      setError(CHAT_NAME_TAKEN_MESSAGE);
+      return;
+    }
+    setJoining(true);
+    setError("");
+    try {
+      const participant = await reserveEventChatIdentity({ event_id: eventId, display_name: name });
+      const identity = {
+        participantId: participant.id,
+        displayName: participant.display_name,
+        avatarId: participant.avatar_id,
+      };
+      storeChatIdentity(eventId, identity);
+      console.info("[live-chat-join-state]", {
+        eventId,
+        joined: true,
+        action: "join-submitted",
+      });
+      setDisplayName("");
+      onJoin(identity);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : CHAT_NAME_TAKEN_MESSAGE);
+    } finally {
+      setJoining(false);
+    }
   }
 
   return (
@@ -1711,10 +1771,10 @@ function JoinChatPanel({ eventId, storageKey, onJoin }: { eventId: string; stora
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: `2px solid ${GREEN}`, paddingBottom: "0.35rem" }}>
         <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
-        <input value={displayName} onChange={event => setDisplayName(event.target.value)} maxLength={50} aria-label="Display name" autoComplete={`event-${eventId}-name`} style={terminalInputStyle} />
+        <input value={displayName} onChange={event => setDisplayName(event.target.value)} maxLength={16} aria-label="Display name" autoComplete={`event-${eventId}-name`} style={terminalInputStyle} />
         <span className="cursor-blink" style={{ width: 10, height: 3, background: GREEN }} />
       </div>
-      <button disabled={!displayName.trim()} style={enterButtonStyle}>
+      <button disabled={joining || !displayName.trim()} style={enterButtonStyle}>
         [ enter ]
       </button>
       {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem", textAlign: "center" }}>{error}</p>}
@@ -1722,7 +1782,7 @@ function JoinChatPanel({ eventId, storageKey, onJoin }: { eventId: string; stora
   );
 }
 
-function ActiveChatComposer({ eventId, displayName, live, starting }: { eventId: string; displayName: string; live: boolean; starting: boolean }) {
+function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: string; identity: JoinedChatIdentity; live: boolean; starting: boolean }) {
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
@@ -1774,7 +1834,14 @@ function ActiveChatComposer({ eventId, displayName, live, starting }: { eventId:
     setError("");
     try {
       const clientToken = crypto.randomUUID();
-      const message = await sendVisitorMessage({ event_id: eventId, display_name: displayName, body, client_token: clientToken });
+      const message = await sendVisitorMessage({
+        event_id: eventId,
+        participant_id: identity.participantId,
+        display_name: identity.displayName,
+        avatar_id: identity.avatarId,
+        body,
+        client_token: clientToken,
+      });
       setBody("");
       setLastSentAt(sentAt);
       setPendingSubmission({ id: message.id, clientToken });
@@ -1793,8 +1860,8 @@ function ActiveChatComposer({ eventId, displayName, live, starting }: { eventId:
       {live ? (
         <form onSubmit={submitMessage} style={{ display: "grid", gap: "0.5rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", borderTop: "1px solid rgba(0,255,65,0.1)", paddingTop: "0.7rem" }}>
-            <ChatAvatar eventId={eventId} name={displayName} />
-            <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.05rem", letterSpacing: "0.06em", maxWidth: "min(26vw, 140px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{displayName}</span>
+            <ChatAvatar avatarId={identity.avatarId} />
+            <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.05rem", letterSpacing: "0.06em", maxWidth: "min(26vw, 140px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{identity.displayName}</span>
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
             <input value={body} onChange={event => setBody(event.target.value)} disabled={Boolean(pendingSubmission)} maxLength={500} aria-label="Message" style={{ ...terminalInputStyle, fontSize: "1.05rem" }} />
             <button disabled={!canSend} style={sendButtonStyle(canSend)}>send</button>

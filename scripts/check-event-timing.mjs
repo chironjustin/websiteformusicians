@@ -93,12 +93,12 @@ assert(!publicPage.includes("Artwork size={320}"), "Live state must not mount th
 assert(publicPage.includes("join chat") && publicPage.includes("choose name:"), "Live state must include the centered chat entry composition.");
 assert(publicPage.includes('CHAT_NAME_KEY_PREFIX = "music-event-chat-name:"'), "Live chat name must use the event-specific key prefix.");
 assert(publicPage.includes("getEventChatNameKey(eventId)"), "Live chat name must be keyed by the database event id.");
-assert(publicPage.includes("window.localStorage.setItem(storageKey, name)"), "Joining chat must persist the event-specific display name.");
+assert(publicPage.includes("storeChatIdentity(eventId, identity)") && publicPage.includes("getEventChatParticipantKey(eventId)"), "Joining chat must persist the event-specific participant identity.");
 assert(publicPage.includes("removeLegacyChatIdentity") && publicPage.includes('"live-chat-name"') && publicPage.includes('"joined-chat"'), "Legacy global chat identity keys must be removed.");
 assert(publicPage.includes("removeEventChatIdentity(currentEventId)") && publicPage.includes('state === "finished"'), "Finished events must clear their stored chat identity.");
 assert(publicPage.includes("removeEventChatIdentity(priorEventId)") && publicPage.includes("priorEventId !== currentEventId"), "Replacing the active event must clear the prior event identity.");
 assert(publicPage.includes("key={event.id}"), "Live view must remount when the event id changes to reset drafts and temporary state.");
-assert(publicPage.includes("function ActiveChatComposer") && publicPage.includes("displayName={joinedName}"), "Message composer must appear only after the visitor joins.");
+assert(publicPage.includes("function ActiveChatComposer") && publicPage.includes("identity={joinedIdentity}"), "Message composer must appear only after the visitor joins.");
 assert(publicPage.includes("function LiveMessageStream"), "Approved messages must render independently from the join state.");
 assert(!publicPage.includes("joined || message.is_admin"), "Pre-join approved messages must not suppress visitor avatars.");
 assert(publicPage.includes("pendingSubmission") && publicPage.includes("Waiting..."), "Submitted visitor messages must show Waiting while the tracked row is pending.");
@@ -112,6 +112,7 @@ assert(chatHook.includes("filter: `event_id=eq.${eventId}`"), "Realtime chat sub
 const chatService = readFileSync("src/services/chatService.ts", "utf8");
 assert(chatService.includes('.eq("event_id", eventId)') && chatService.includes('.eq("status", "approved")'), "Public chat query must fetch approved messages for the active event only.");
 assert(chatService.includes('supabase.rpc("submit_chat_message"') && chatService.includes("p_client_token") && chatService.includes("get_visitor_chat_message_status"), "Visitor submissions must use the scoped public RPC and pending-status lookup.");
+assert(chatService.includes("normalizeChatName") && chatService.includes("reserve_event_chat_identity") && chatService.includes("USER_AVATAR_IDS"), "Visitor chat names must use event-scoped reservation and the fixed avatar pool.");
 assert(chatService.includes('supabase.rpc("set_chat_message_pin"') && chatService.includes('supabase.rpc("set_chat_message_highlight"'), "Pin and highlight actions must use event-scoped RPC helpers.");
 assert(chatService.includes("p_message_id") && chatService.includes("p_pinned") && chatService.includes("p_highlighted"), "Pin and highlight RPC calls must use the deployed p_ argument names.");
 
@@ -122,6 +123,8 @@ const chatSchema = readFileSync("supabase/chat-schema.sql", "utf8");
 assert(chatSchema.includes("event_id uuid references public.events") && chatSchema.includes("client_token uuid"), "Chat schema must associate messages with events and pending-status client tokens.");
 assert(chatSchema.includes("chat_messages_event_status_created_idx") && chatSchema.includes("chat_messages_event_client_token_idx"), "Chat schema must include event-scoped retrieval indexes.");
 assert(chatSchema.includes("create or replace function public.submit_chat_message"), "Chat schema must provide a public pending-message submit RPC.");
+assert(chatSchema.includes("create table if not exists public.event_chat_participants") && chatSchema.includes("event_chat_participants_event_normalized_name_idx"), "Chat schema must enforce event-scoped temporary username uniqueness.");
+assert(chatSchema.includes("create or replace function public.reserve_event_chat_identity") && chatSchema.includes("chat_name_taken"), "Chat schema must reserve temporary usernames atomically and reject artist-name collisions.");
 assert(chatSchema.includes("revoke insert on public.chat_messages from anon"), "Anonymous visitors must not rely on fragile direct table inserts.");
 assert(chatSchema.includes("events.starts_at <= now()") && chatSchema.includes("events.ends_at > now()"), "Visitor submit RPC must require the active live timestamp window.");
 assert(chatSchema.includes("user_id") && chatSchema.includes("is_admin") && chatSchema.includes("is_pinned") && chatSchema.includes("is_highlighted") && chatSchema.includes("is_liked"), "Visitor submit RPC must force non-privileged pending messages.");

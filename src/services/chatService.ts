@@ -1,11 +1,45 @@
 import { supabase } from "@/lib/supabase";
-import type { ChatMessage, ChatMessageStatus, CreateAdminChatMessageInput, CreateVisitorChatMessageInput } from "@/types/chat";
+import type { ChatMessage, ChatMessageStatus, ChatParticipant, CreateAdminChatMessageInput, CreateVisitorChatMessageInput } from "@/types/chat";
 
-const MAX_DISPLAY_NAME = 50;
+export const CHAT_NAME_LENGTH_MESSAGE = "name must be 1–16 characters";
+export const CHAT_NAME_TAKEN_MESSAGE = "Name already taken - choose a different one.";
+export const USER_AVATAR_IDS = [
+  "retro-1",
+  "retro-2",
+  "retro-3",
+  "retro-4",
+  "retro-5",
+  "retro-6",
+  "retro-7",
+  "retro-8",
+] as const;
+
+const MAX_DISPLAY_NAME = 16;
+const MAX_ADMIN_DISPLAY_NAME = 50;
 const MAX_BODY = 500;
 
 function cleanText(value: string, maxLength: number) {
   return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function cleanDisplayName(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+export function normalizeChatName(value: string) {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("en");
+}
+
+export function pickRandomUserAvatarId() {
+  const index = Math.floor(Math.random() * USER_AVATAR_IDS.length);
+  return USER_AVATAR_IDS[index] ?? USER_AVATAR_IDS[0];
+}
+
+export function isUserAvatarId(value: string | null | undefined): value is typeof USER_AVATAR_IDS[number] {
+  return Boolean(value && (USER_AVATAR_IDS as readonly string[]).includes(value));
 }
 
 function assertBody(body: string) {
@@ -14,8 +48,7 @@ function assertBody(body: string) {
 }
 
 function assertDisplayName(displayName: string) {
-  if (!displayName) throw new Error("Display name is required.");
-  if (displayName.length > MAX_DISPLAY_NAME) throw new Error("Display name is too long.");
+  if (!displayName || displayName.length > MAX_DISPLAY_NAME) throw new Error(CHAT_NAME_LENGTH_MESSAGE);
 }
 
 function assertEventId(eventId: string | null | undefined) {
@@ -51,21 +84,56 @@ export async function getAdminChatMessages(eventId: string) {
 
 export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
   assertEventId(input.event_id);
-  const displayName = cleanText(input.display_name, MAX_DISPLAY_NAME);
+  const displayName = cleanDisplayName(input.display_name);
   const body = cleanText(input.body, MAX_BODY);
   const clientToken = input.client_token ?? crypto.randomUUID();
   assertDisplayName(displayName);
   assertBody(body);
+  if (!input.participant_id) throw new Error("A reserved chat identity is required.");
+  if (!isUserAvatarId(input.avatar_id)) throw new Error("A valid chat avatar is required.");
 
   const { data, error } = await supabase.rpc("submit_chat_message", {
+    p_avatar_id: input.avatar_id,
     p_body: body,
     p_client_token: clientToken,
     p_display_name: displayName,
     p_event_id: input.event_id,
+    p_participant_id: input.participant_id,
   });
 
   if (error) throw new Error(error.message);
   return data as ChatMessage;
+}
+
+export async function reserveEventChatIdentity(input: { event_id: string; display_name: string; avatar_id?: string }) {
+  assertEventId(input.event_id);
+  const displayName = cleanDisplayName(input.display_name);
+  assertDisplayName(displayName);
+  const avatarId = isUserAvatarId(input.avatar_id) ? input.avatar_id : pickRandomUserAvatarId();
+
+  const { data, error } = await supabase.rpc("reserve_event_chat_identity", {
+    p_avatar_id: avatarId,
+    p_display_name: displayName,
+    p_event_id: input.event_id,
+    p_normalized_name: normalizeChatName(displayName),
+  });
+
+  if (error) {
+    const message = error.message ?? "";
+    if (
+      message.includes("chat_name_taken")
+      || message.includes("duplicate key")
+      || message.includes("event_chat_participants_event_normalized_name_key")
+    ) {
+      throw new Error(CHAT_NAME_TAKEN_MESSAGE);
+    }
+    if (message.includes("chat_name_length")) {
+      throw new Error(CHAT_NAME_LENGTH_MESSAGE);
+    }
+    throw new Error(message);
+  }
+
+  return data as ChatParticipant;
 }
 
 export async function getVisitorMessageStatus(eventId: string, messageId: string, clientToken: string) {
@@ -81,7 +149,7 @@ export async function getVisitorMessageStatus(eventId: string, messageId: string
 
 export async function sendAdminMessage(input: CreateAdminChatMessageInput) {
   assertEventId(input.event_id);
-  const displayName = cleanText(input.display_name || "Admin", MAX_DISPLAY_NAME);
+  const displayName = cleanText(input.display_name || "Admin", MAX_ADMIN_DISPLAY_NAME);
   const body = cleanText(input.body, MAX_BODY);
   assertDisplayName(displayName);
   assertBody(body);

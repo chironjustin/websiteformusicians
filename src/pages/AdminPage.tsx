@@ -608,7 +608,7 @@ function formatAdminDateTime(value: string) {
   if (!value) return "the selected time";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "the selected time";
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -1179,7 +1179,7 @@ function SmallButton({ children, onClick, disabled, color = "#6366f1" }: { child
 }
 
 function formatChatTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
