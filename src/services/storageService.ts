@@ -35,18 +35,6 @@ type SignedAudioUrlOptions = {
   startedAt?: number;
 };
 
-type SignedAudioRestRequestOptions = SignedAudioUrlOptions & {
-  diagnosticLabel: string;
-};
-
-type SignedAudioRestRequestResult = {
-  signedUrl: string;
-  elapsedMs: number;
-  status: number;
-  contentType: string;
-  signedUrlPath: string;
-};
-
 async function requireUserId() {
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) throw new Error("You must be signed in to upload files.");
@@ -103,6 +91,16 @@ export class SignedAudioUrlTimeoutError extends Error {
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new SignedAudioUrlTimeoutError(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  });
+}
+
 function getBrowserOnlineState() {
   return typeof navigator === "undefined" ? null : navigator.onLine;
 }
@@ -143,133 +141,6 @@ export async function getSafeSupabaseSessionState(): Promise<SafeSessionState> {
       getSessionResolved: false,
       errorMessage: error instanceof Error ? error.message : String(error),
     };
-  }
-}
-
-function sanitizeResponseTextForLog(value: string) {
-  if (!value) return "";
-  return value
-    .replace(/https?:\/\/[^\s"']+/gi, match => sanitizeUrlPath(match))
-    .replace(/\?[^"'\s]*/g, "?[redacted]")
-    .slice(0, 800);
-}
-
-function normalizeSignedUrl(rawSignedUrl: string) {
-  if (!rawSignedUrl) return "";
-  return rawSignedUrl.startsWith("/") ? `${supabaseUrl.replace(/\/+$/, "")}${rawSignedUrl}` : rawSignedUrl;
-}
-
-async function requestSignedAudioUrlViaRest(path: string, expiresIn: number, options: SignedAudioRestRequestOptions): Promise<SignedAudioRestRequestResult> {
-  const objectPath = normalizeObjectPath("audio", path);
-  const startedAt = options.startedAt ?? Date.now();
-  const timeoutMs = options.timeoutMs ?? 15000;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/object/sign/audio/${encodeStoragePath(objectPath)}`;
-  const endpointPath = sanitizeUrlPath(endpoint);
-
-  try {
-    const { data, error: sessionError } = await supabase.auth.getSession();
-    const bearer = data.session?.access_token ?? supabaseAnonKey;
-    if (sessionError) {
-      console.info("[signed-audio-url-rest] session warning", {
-        requestId: options.requestId ?? null,
-        eventId: options.eventId ?? null,
-        endpointPath,
-        sessionError: sessionError.message,
-      });
-    }
-
-    console.info("[signed-audio-url-rest] request started", {
-      label: options.diagnosticLabel,
-      requestId: options.requestId ?? null,
-      attempt: options.attempt ?? null,
-      eventId: options.eventId ?? null,
-      sourceKey: options.sourceKey ?? "",
-      normalizedAudioPath: objectPath,
-      endpointPath,
-      projectHost: getSupabaseProjectHost(),
-      timeoutMs,
-      credentials: "omit",
-      cache: "no-store",
-      session: data.session ? "authenticated" : "anon",
-      online: getBrowserOnlineState(),
-      visibilityState: getBrowserVisibilityState(),
-    });
-
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        apikey: supabaseAnonKey,
-        authorization: `Bearer ${bearer}`,
-        "content-type": "application/json",
-        "cache-control": "no-store",
-      },
-      body: JSON.stringify({ expiresIn }),
-      cache: "no-store",
-      credentials: "omit",
-      signal: controller.signal,
-    });
-    const elapsedMs = Date.now() - startedAt;
-    const contentType = response.headers.get("content-type") ?? "";
-    const text = await response.text();
-    const safeBody = sanitizeResponseTextForLog(text);
-
-    console.info("[signed-audio-url-rest] response received", {
-      label: options.diagnosticLabel,
-      requestId: options.requestId ?? null,
-      attempt: options.attempt ?? null,
-      eventId: options.eventId ?? null,
-      normalizedAudioPath: objectPath,
-      endpointPath,
-      elapsedMs,
-      status: response.status,
-      ok: response.ok,
-      contentType,
-      body: safeBody,
-    });
-
-    let payload: { signedURL?: string; signedUrl?: string; error?: string; message?: string } = {};
-    try {
-      payload = text ? JSON.parse(text) : {};
-    } catch (error) {
-      throw new Error(`Storage signing response was not valid JSON. HTTP ${response.status}.`);
-    }
-
-    if (!response.ok) {
-      throw new Error(payload.error || payload.message || `Storage signing failed with HTTP ${response.status}.`);
-    }
-
-    const signedUrl = normalizeSignedUrl(payload.signedURL ?? payload.signedUrl ?? "");
-    if (!signedUrl) {
-      throw new Error("Storage signing response did not include a signed URL.");
-    }
-
-    return {
-      signedUrl,
-      elapsedMs,
-      status: response.status,
-      contentType,
-      signedUrlPath: sanitizeUrlPath(signedUrl),
-    };
-  } catch (error) {
-    const timedOut = error instanceof Error && error.name === "AbortError";
-    const safeError = timedOut ? new SignedAudioUrlTimeoutError(`Timed out creating signed audio URL after ${timeoutMs}ms.`) : error;
-    console.info("[signed-audio-url-rest] request failed", {
-      label: options.diagnosticLabel,
-      requestId: options.requestId ?? null,
-      attempt: options.attempt ?? null,
-      eventId: options.eventId ?? null,
-      normalizedAudioPath: objectPath,
-      endpointPath,
-      elapsedMs: Date.now() - startedAt,
-      timedOut,
-      errorName: safeError instanceof Error ? safeError.name : "UnknownError",
-      errorMessage: safeError instanceof Error ? safeError.message : String(safeError),
-    });
-    throw safeError;
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 
@@ -361,7 +232,7 @@ export function getPublicImageUrl(bucket: Exclude<Bucket, "audio">, path: string
 export async function getSignedAudioUrl(path: string | null | undefined, expiresIn = 3600, options: SignedAudioUrlOptions = {}) {
   const objectPath = normalizeObjectPath("audio", path);
   if (!objectPath) return "";
-  const timeoutMs = options.timeoutMs ?? 15000;
+  const timeoutMs = options.timeoutMs ?? 10000;
   const startedAt = options.startedAt ?? Date.now();
   console.info("[signed-audio-url-request] started", {
     requestId: options.requestId ?? null,
@@ -377,24 +248,23 @@ export async function getSignedAudioUrl(path: string | null | undefined, expires
   });
 
   try {
-    const result = await requestSignedAudioUrlViaRest(objectPath, expiresIn, {
-      ...options,
-      diagnosticLabel: "production",
+    const { data, error } = await withTimeout(
+      supabase.storage.from("audio").createSignedUrl(objectPath, expiresIn),
       timeoutMs,
-      startedAt,
-    });
+      `Timed out creating signed audio URL after ${timeoutMs}ms.`,
+    );
+    const elapsedMs = Date.now() - startedAt;
+    if (error) throw new Error(error.message);
     console.info("[signed-audio-url-request] resolved", {
       requestId: options.requestId ?? null,
       attempt: options.attempt ?? null,
       eventId: options.eventId ?? null,
       normalizedAudioPath: objectPath,
-      elapsedMs: result.elapsedMs,
-      status: result.status,
-      contentType: result.contentType,
-      signedUrlPresent: Boolean(result.signedUrl),
-      signedUrlPath: result.signedUrlPath,
+      elapsedMs,
+      signedUrlPresent: Boolean(data.signedUrl),
+      signedUrlPath: sanitizeUrlPath(data.signedUrl),
     });
-    return result.signedUrl;
+    return data.signedUrl;
   } catch (error) {
     const elapsedMs = Date.now() - startedAt;
     console.info("[signed-audio-url-request] rejected", {
@@ -413,21 +283,42 @@ export async function getSignedAudioUrl(path: string | null | undefined, expires
 export async function getSignedAudioUrlViaRestDiagnostic(path: string | null | undefined, expiresIn = 3600, timeoutMs = 10000): Promise<DirectSignedAudioUrlDiagnostic> {
   const objectPath = normalizeObjectPath("audio", path);
   const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const sessionState = await getSafeSupabaseSessionState();
+  const { data } = await supabase.auth.getSession();
+  const bearer = data.session?.access_token ?? supabaseAnonKey;
+  const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/object/sign/audio/${encodeStoragePath(objectPath)}`;
 
   try {
-    const restResult = await requestSignedAudioUrlViaRest(objectPath, expiresIn, {
-      diagnosticLabel: "native-audio-test",
-      timeoutMs,
-      startedAt,
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        apikey: supabaseAnonKey,
+        authorization: `Bearer ${bearer}`,
+        "content-type": "application/json",
+        "cache-control": "no-store",
+      },
+      body: JSON.stringify({ expiresIn }),
+      signal: controller.signal,
     });
+    const text = await response.text();
+    let payload: { signedURL?: string; signedUrl?: string; error?: string; message?: string } = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { message: text };
+    }
+    const rawSignedUrl = payload.signedURL ?? payload.signedUrl ?? "";
+    const signedUrl = rawSignedUrl.startsWith("/") ? `${supabaseUrl.replace(/\/+$/, "")}${rawSignedUrl}` : rawSignedUrl;
+    const errorMessage = response.ok ? "" : payload.error || payload.message || `HTTP ${response.status}`;
     const result: DirectSignedAudioUrlDiagnostic = {
-      state: "resolved",
-      elapsedMs: restResult.elapsedMs,
-      status: restResult.status,
-      signedUrlPresent: Boolean(restResult.signedUrl),
-      signedUrlPath: restResult.signedUrlPath,
-      errorMessage: "",
+      state: response.ok && Boolean(signedUrl) ? "resolved" : "rejected",
+      elapsedMs: Date.now() - startedAt,
+      status: response.status,
+      signedUrlPresent: Boolean(signedUrl),
+      signedUrlPath: sanitizeUrlPath(signedUrl),
+      errorMessage,
     };
     console.info("[signed-audio-url-rest-diagnostic] completed", {
       normalizedAudioPath: objectPath,
@@ -437,7 +328,7 @@ export async function getSignedAudioUrlViaRestDiagnostic(path: string | null | u
     });
     return result;
   } catch (error) {
-    const timedOut = error instanceof SignedAudioUrlTimeoutError;
+    const timedOut = error instanceof Error && error.name === "AbortError";
     const result: DirectSignedAudioUrlDiagnostic = {
       state: timedOut ? "timed-out" : "rejected",
       elapsedMs: Date.now() - startedAt,
@@ -453,5 +344,7 @@ export async function getSignedAudioUrlViaRestDiagnostic(path: string | null | u
       ...result,
     });
     return result;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
