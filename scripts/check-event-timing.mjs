@@ -67,7 +67,7 @@ assert(localSelected.getHours() === 16 && localSelected.getMinutes() === 36, "St
 
 const publicPage = readFileSync("src/pages/PublicEventPage.tsx", "utf8");
 assert(publicPage.includes('if (state !== "live")'), "Public page must not request audio while upcoming.");
-assert(publicPage.includes("<AudioPlayer audioUrl={audioUrl} sourceStatus={audioSourceStatus} startsAt={startsAt} />"), "Live must keep the audio controls mounted in the compact header with explicit audio-source state.");
+assert(publicPage.includes("<AudioPlayer audioUrl={audioUrl}") && publicPage.includes("sourceStatus={audioSourceStatus}") && publicPage.includes("startsAt={startsAt}"), "Live must keep the audio controls mounted in the compact header with explicit audio-source state.");
 assert(publicPage.includes('aria-label={playing ? "Pause live audio" : "Resume live audio"}'), "Live play control must remain an accessible resume/pause control.");
 assert(publicPage.includes('loop') && publicPage.includes('playsInline') && publicPage.includes('preload="metadata"'), "Live audio must use the shared mobile-ready audio element.");
 assert(publicPage.includes("onLoadedMetadata={handleMediaReady}") && publicPage.includes("onDurationChange={handleMediaReady}") && publicPage.includes("onCanPlay={handleMediaReady}"), "Live audio readiness must be handled declaratively on the real audio element.");
