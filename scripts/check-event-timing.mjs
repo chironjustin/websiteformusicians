@@ -67,14 +67,21 @@ assert(localSelected.getHours() === 16 && localSelected.getMinutes() === 36, "St
 
 const publicPage = readFileSync("src/pages/PublicEventPage.tsx", "utf8");
 assert(publicPage.includes('if (state !== "live")'), "Public page must not request audio while upcoming.");
-assert(publicPage.includes("<AudioPlayer audioUrl={audioUrl} startsAt={startsAt} />"), "Live must keep the audio controls mounted in the compact header.");
+assert(publicPage.includes("<AudioPlayer audioUrl={audioUrl} sourceStatus={audioSourceStatus} startsAt={startsAt} />"), "Live must keep the audio controls mounted in the compact header with explicit audio-source state.");
 assert(publicPage.includes('aria-label={playing ? "Pause live audio" : "Resume live audio"}'), "Live play control must remain an accessible resume/pause control.");
-assert(publicPage.includes('loop playsInline preload="metadata"'), "Live audio must use the shared mobile-ready audio element.");
+assert(publicPage.includes('loop') && publicPage.includes('playsInline') && publicPage.includes('preload="metadata"'), "Live audio must use the shared mobile-ready audio element.");
+assert(publicPage.includes("onLoadedMetadata={handleMediaReady}") && publicPage.includes("onDurationChange={handleMediaReady}") && publicPage.includes("onCanPlay={handleMediaReady}"), "Live audio readiness must be handled declaratively on the real audio element.");
+assert(publicPage.includes("getUsableDuration") && publicPage.includes("audioRef.current?.duration"), "Live audio must use the real media duration when metadata is already available.");
+assert(publicPage.includes("readyState >= HTMLMediaElement.HAVE_METADATA"), "Live audio must initialize already-loaded metadata.");
+assert(publicPage.includes('sourceStatus === "loading"') && publicPage.includes('sourceStatus === "error"') && publicPage.includes("audio unavailable"), "Live audio must expose loading and unavailable signed-URL states.");
+assert(publicPage.includes("Live audio signed URL failed") && publicPage.includes("sanitizeUrlForLog"), "Signed URL failures must be logged safely instead of swallowed.");
+assert(publicPage.includes("const disabled = !audioUrl;"), "Resume must be enabled as soon as a signed audio URL exists.");
+assert(publicPage.includes("nativeAudioTest") && publicPage.includes("function NativeAudioTestPlayer") && publicPage.includes("controls") && publicPage.includes("AUDIO ELEMENT MOUNTED"), "Native audio test mode must be available behind the diagnostic query string.");
 assert(publicPage.includes('type="button"') && publicPage.includes('width: "2.75rem"') && publicPage.includes('pointerEvents: "auto"') && publicPage.includes('touchAction: "manipulation"'), "Live play control must stay tappable on mobile.");
 assert(publicPage.includes('pointerEvents: "none"') && publicPage.includes('role="progressbar"'), "Live audio progress must remain visual-only and non-seekable.");
 assert(!publicPage.includes("durationRef") && !publicPage.includes("playingRef") && !publicPage.includes("pendingResumeRef"), "Live audio must not use duplicate ref-based controller state.");
 assert(publicPage.includes("const audioRef = useRef<HTMLAudioElement>(null)") && publicPage.includes("const [progress, setProgress]") && publicPage.includes("const [duration, setDuration]"), "Live audio must use one shared audio ref and state controller.");
-assert(publicPage.includes("return elapsed % duration") && publicPage.includes("setProgress(livePosition)") && publicPage.includes("window.setInterval"), "Live progress must derive from the event timeline.");
+assert(publicPage.includes("return elapsed % usableDuration") && publicPage.includes("setProgress(livePosition)") && publicPage.includes("window.setInterval"), "Live progress must derive from the event timeline.");
 assert(publicPage.includes("flexWrap: \"nowrap\"") && publicPage.includes("<CompactLiveCountdown target={liveTarget} />"), "Live header must keep title, audio player, and event countdown in one compact row.");
 assert(publicPage.includes("function ChatMessageBubble") && publicPage.includes("const pinnedMessage = messages.find"), "Live chat must render pinned content in a reserved area before the feed.");
 assert(publicPage.includes('useEventChat(state === "live" ? event?.id : undefined'), "Public chat subscription must only initialize while live.");
@@ -93,6 +100,7 @@ assert(publicPage.includes("removeEventChatIdentity(priorEventId)") && publicPag
 assert(publicPage.includes("key={event.id}"), "Live view must remount when the event id changes to reset drafts and temporary state.");
 assert(publicPage.includes("function ActiveChatComposer") && publicPage.includes("displayName={joinedName}"), "Message composer must appear only after the visitor joins.");
 assert(publicPage.includes("function LiveMessageStream"), "Approved messages must render independently from the join state.");
+assert(!publicPage.includes("joined || message.is_admin"), "Pre-join approved messages must not suppress visitor avatars.");
 assert(publicPage.includes("pendingSubmission") && publicPage.includes("Waiting..."), "Submitted visitor messages must show Waiting while the tracked row is pending.");
 assert(publicPage.includes("getVisitorMessageStatus(eventId, pendingSubmission.id, pendingSubmission.clientToken)"), "Waiting state must check the submitted message status by event id, row id, and client token.");
 assert(publicPage.includes('live={authoritativeState === "live"}'), "Public chat submission must depend on authoritative database live status.");

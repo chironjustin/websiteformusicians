@@ -13,6 +13,7 @@ const VT = "'VT323', monospace";
 const PSP = "'Press Start 2P', cursive";
 
 type DisplayState = "upcoming" | "live" | "finished";
+type AudioSourceStatus = "idle" | "loading" | "ready" | "error";
 
 const CHAT_NAME_KEY_PREFIX = "music-event-chat-name:";
 const CHAT_AVATAR_KEY_PREFIX = "music-event-chat-avatar:";
@@ -28,6 +29,23 @@ function splitMs(ms: number) {
 
 function fmtSecs(seconds: number) {
   return `${pad2(Math.floor(seconds / 60))}:${pad2(seconds % 60)}`;
+}
+
+function sanitizeUrlForLog(value: string) {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    return url.pathname;
+  } catch {
+    return value.split("?")[0]?.split("#")[0] ?? "";
+  }
+}
+
+function getErrorLogInfo(error: unknown) {
+  return {
+    errorName: error instanceof Error ? error.name : "UnknownError",
+    errorMessage: error instanceof Error ? error.message : String(error),
+  };
 }
 
 function hashString(value: string) {
@@ -225,26 +243,180 @@ function Countdown({ target, mode = "countdown" }: { target: string | null; mode
   );
 }
 
-function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: string | null }) {
+type NativeAudioDiagnostics = {
+  audioUrlPresent: boolean;
+  readyState: number;
+  networkState: number;
+  duration: number | string;
+  paused: boolean;
+  muted: boolean;
+  volume: number;
+  currentTime: number;
+  mediaErrorCode: number | string;
+  loadedmetadataFired: boolean;
+  canplayFired: boolean;
+  playFired: boolean;
+  playingFired: boolean;
+  pauseFired: boolean;
+  errorFired: boolean;
+};
+
+function AudioPlayer(props: { audioUrl: string; startsAt: string | null; sourceStatus: AudioSourceStatus }) {
+  const nativeAudioTest = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("nativeAudioTest") === "1";
+  if (nativeAudioTest) return <NativeAudioTestPlayer audioUrl={props.audioUrl} sourceStatus={props.sourceStatus} />;
+  return <CustomAudioPlayer {...props} />;
+}
+
+function NativeAudioTestPlayer({ audioUrl, sourceStatus }: { audioUrl: string; sourceStatus: AudioSourceStatus }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [diagnostics, setDiagnostics] = useState<NativeAudioDiagnostics>({
+    audioUrlPresent: Boolean(audioUrl),
+    readyState: 0,
+    networkState: 0,
+    duration: "n/a",
+    paused: true,
+    muted: false,
+    volume: 1,
+    currentTime: 0,
+    mediaErrorCode: "none",
+    loadedmetadataFired: false,
+    canplayFired: false,
+    playFired: false,
+    playingFired: false,
+    pauseFired: false,
+    errorFired: false,
+  });
+
+  const updateDiagnostics = (eventName?: keyof Pick<NativeAudioDiagnostics, "loadedmetadataFired" | "canplayFired" | "playFired" | "playingFired" | "pauseFired" | "errorFired">) => {
+    const audio = audioRef.current;
+    setDiagnostics(previous => ({
+      ...previous,
+      ...(eventName ? { [eventName]: true } : {}),
+      audioUrlPresent: Boolean(audioUrl),
+      readyState: audio?.readyState ?? 0,
+      networkState: audio?.networkState ?? 0,
+      duration: Number.isFinite(audio?.duration) ? Number((audio?.duration ?? 0).toFixed(3)) : "n/a",
+      paused: audio?.paused ?? true,
+      muted: audio?.muted ?? false,
+      volume: audio?.volume ?? 1,
+      currentTime: Number((audio?.currentTime ?? 0).toFixed(3)),
+      mediaErrorCode: audio?.error?.code ?? "none",
+    }));
+  };
+
+  useEffect(() => {
+    console.info("AUDIO ELEMENT MOUNTED");
+    updateDiagnostics();
+    return () => {
+      console.info("AUDIO ELEMENT UNMOUNTED");
+    };
+  }, []);
+
+  useEffect(() => {
+    console.info("AUDIO SRC CHANGED", {
+      audioUrlPresent: Boolean(audioUrl),
+      audioUrlPath: sanitizeUrlForLog(audioUrl),
+    });
+    updateDiagnostics();
+  }, [audioUrl]);
+
+  const rows: Array<[string, string]> = [
+    ["audio URL present", diagnostics.audioUrlPresent ? "yes" : "no"],
+    ["readyState", String(diagnostics.readyState)],
+    ["networkState", String(diagnostics.networkState)],
+    ["duration", String(diagnostics.duration)],
+    ["paused", diagnostics.paused ? "yes" : "no"],
+    ["muted", diagnostics.muted ? "yes" : "no"],
+    ["volume", String(diagnostics.volume)],
+    ["currentTime", String(diagnostics.currentTime)],
+    ["media error code", String(diagnostics.mediaErrorCode)],
+    ["loadedmetadata fired", diagnostics.loadedmetadataFired ? "yes" : "no"],
+    ["canplay fired", diagnostics.canplayFired ? "yes" : "no"],
+    ["play fired", diagnostics.playFired ? "yes" : "no"],
+    ["playing fired", diagnostics.playingFired ? "yes" : "no"],
+    ["pause fired", diagnostics.pauseFired ? "yes" : "no"],
+    ["error fired", diagnostics.errorFired ? "yes" : "no"],
+  ];
+
+  return (
+    <div style={{ display: "grid", gap: "0.65rem", width: "100%", minWidth: "4.5rem" }}>
+      {audioUrl ? (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          controls
+          playsInline
+          preload="auto"
+          onLoadedMetadata={() => updateDiagnostics("loadedmetadataFired")}
+          onCanPlay={() => updateDiagnostics("canplayFired")}
+          onPlay={() => updateDiagnostics("playFired")}
+          onPlaying={() => updateDiagnostics("playingFired")}
+          onPause={() => updateDiagnostics("pauseFired")}
+          onError={() => updateDiagnostics("errorFired")}
+          onTimeUpdate={() => updateDiagnostics()}
+          onDurationChange={() => updateDiagnostics()}
+          onVolumeChange={() => updateDiagnostics()}
+          style={{ width: "100%", maxWidth: "min(100%, 24rem)" }}
+        />
+      ) : (
+        <p style={{ fontFamily: VT, color: sourceStatus === "error" ? "#ff5c5c" : "rgba(0,255,65,0.65)", fontSize: "1rem" }}>
+          {sourceStatus === "loading" ? "loading native audio..." : "native audio unavailable"}
+        </p>
+      )}
+      <div style={{ display: "grid", gap: "0.2rem", fontFamily: VT, fontSize: "0.9rem", color: "rgba(255,255,255,0.7)", letterSpacing: "0.04em" }}>
+        {rows.map(([label, value]) => (
+          <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: "1rem", borderBottom: "1px solid rgba(0,255,65,0.08)", paddingBottom: "0.1rem" }}>
+            <span style={{ color: "rgba(0,255,65,0.65)" }}>{label}:</span>
+            <span>{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CustomAudioPlayer({ audioUrl, startsAt, sourceStatus }: { audioUrl: string; startsAt: string | null; sourceStatus: AudioSourceStatus }) {
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  const getLivePosition = () => {
-    if (!startsAt || duration <= 0) return 0;
+  const getUsableDuration = () => {
+    const mediaDuration = audioRef.current?.duration;
+    if (Number.isFinite(mediaDuration) && mediaDuration && mediaDuration > 0) {
+      return mediaDuration;
+    }
+    return duration > 0 ? duration : 0;
+  };
+
+  const getLivePosition = (usableDuration = getUsableDuration()) => {
+    if (!startsAt || usableDuration <= 0) return 0;
     const startedAt = new Date(startsAt).getTime();
     if (Number.isNaN(startedAt)) return 0;
     const elapsed = Math.max(0, (Date.now() - startedAt) / 1000);
-    return elapsed % duration;
+    return elapsed % usableDuration;
+  };
+
+  const initializeMediaDuration = () => {
+    const usableDuration = getUsableDuration();
+    if (usableDuration <= 0) return 0;
+    setDuration(usableDuration);
+    setProgress(getLivePosition(usableDuration));
+    return usableDuration;
+  };
+
+  const handleMediaReady = () => {
+    const usableDuration = initializeMediaDuration();
+    if (usableDuration > 0) syncToLive(false);
   };
 
   const syncToLive = (force = false) => {
     const audio = audioRef.current;
-    if (!audio || duration <= 0) return;
-    const nextPosition = getLivePosition();
+    const usableDuration = getUsableDuration();
+    if (!audio || usableDuration <= 0) return;
+    const nextPosition = getLivePosition(usableDuration);
     const directDrift = Math.abs(audio.currentTime - nextPosition);
-    const loopDrift = duration - directDrift;
+    const loopDrift = usableDuration - directDrift;
     const drift = Math.min(directDrift, loopDrift);
     if (force || drift > 1.5) {
       audio.currentTime = nextPosition;
@@ -255,88 +427,132 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
   const toggle = () => {
     const audio = audioRef.current;
     if (!audio || !audioUrl) return;
-    if (playing) {
+    if (!audio.paused) {
       audio.pause();
       return;
     }
-    syncToLive(true);
-    audio.play().catch(error => {
-      console.error("Live audio playback failed", {
-        errorName: error instanceof Error ? error.name : "UnknownError",
-        errorMessage: error instanceof Error ? error.message : String(error),
-        readyState: audio.readyState,
-        networkState: audio.networkState,
-        paused: audio.paused,
-        duration: audio.duration,
+
+    try {
+      audio.muted = false;
+      audio.volume = 1;
+    } catch (error) {
+      console.warn("Live audio volume restore failed", getErrorLogInfo(error));
+    }
+
+    audio.play()
+      .then(() => {
+        const usableDuration = initializeMediaDuration();
+        if (usableDuration <= 0) return;
+        try {
+          syncToLive(true);
+        } catch (error) {
+          console.error("Live audio synchronization failed", {
+            ...getErrorLogInfo(error),
+            readyState: audio.readyState,
+            networkState: audio.networkState,
+            paused: audio.paused,
+            muted: audio.muted,
+            volume: audio.volume,
+            duration: audio.duration,
+            currentSrc: sanitizeUrlForLog(audio.currentSrc),
+            targetPosition: getLivePosition(usableDuration),
+            audioUrlExists: Boolean(audioUrl),
+          });
+        }
+      })
+      .catch(error => {
+        console.error("Live audio playback failed", {
+          ...getErrorLogInfo(error),
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          paused: audio.paused,
+          muted: audio.muted,
+          volume: audio.volume,
+          duration: audio.duration,
+          currentSrc: sanitizeUrlForLog(audio.currentSrc),
+          targetPosition: null,
+          audioUrlExists: Boolean(audioUrl),
+        });
       });
-    });
   };
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const onTime = () => {
-      if (duration > 0 && !audio.paused) syncToLive(false);
-    };
-    const onMeta = () => {
-      const nextDuration = audio.duration || 0;
-      setDuration(nextDuration);
-      if (nextDuration > 0) {
-        const startedAt = startsAt ? new Date(startsAt).getTime() : Number.NaN;
-        const nextProgress = Number.isNaN(startedAt) ? 0 : Math.max(0, ((Date.now() - startedAt) / 1000)) % nextDuration;
-        setProgress(nextProgress);
-      }
-    };
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onCanPlay = () => syncToLive(false);
     const onVisibility = () => {
       if (!document.hidden) syncToLive(false);
     };
 
-    audio.addEventListener("timeupdate", onTime);
-    audio.addEventListener("loadedmetadata", onMeta);
-    audio.addEventListener("play", onPlay);
-    audio.addEventListener("pause", onPause);
-    audio.addEventListener("canplay", onCanPlay);
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      audio.removeEventListener("timeupdate", onTime);
-      audio.removeEventListener("loadedmetadata", onMeta);
-      audio.removeEventListener("play", onPlay);
-      audio.removeEventListener("pause", onPause);
-      audio.removeEventListener("canplay", onCanPlay);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [audioUrl, duration, startsAt]);
+  }, [audioUrl, startsAt]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audioUrl || !audio) return;
+    if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      handleMediaReady();
+    }
+  }, [audioUrl, startsAt]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (duration <= 0) return;
-      const livePosition = getLivePosition();
+      const usableDuration = getUsableDuration();
+      if (usableDuration <= 0) return;
+      const livePosition = getLivePosition(usableDuration);
       setProgress(livePosition);
       if (playing) syncToLive(false);
     }, 500);
     return () => window.clearInterval(id);
   }, [duration, playing, startsAt]);
 
-  const pct = duration > 0 ? (progress / duration) * 100 : 0;
+  const usableDuration = getUsableDuration();
+  const pct = usableDuration > 0 ? (progress / usableDuration) * 100 : 0;
+  const sourceLabel = sourceStatus === "loading" ? "loading audio" : sourceStatus === "error" ? "audio unavailable" : "";
+  const disabled = !audioUrl;
 
   return (
     <div style={{ width: "100%", minWidth: "4.5rem" }}>
-      {audioUrl && <audio ref={audioRef} src={audioUrl} loop playsInline preload="metadata" />}
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          loop
+          playsInline
+          preload="metadata"
+          onLoadedMetadata={handleMediaReady}
+          onDurationChange={handleMediaReady}
+          onCanPlay={handleMediaReady}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onError={() => {
+            const audio = audioRef.current;
+            console.error("Live audio element error", {
+              readyState: audio?.readyState,
+              networkState: audio?.networkState,
+              paused: audio?.paused,
+              muted: audio?.muted,
+              volume: audio?.volume,
+              duration: audio?.duration,
+              currentSrc: sanitizeUrlForLog(audio?.currentSrc ?? ""),
+              errorCode: audio?.error?.code,
+              errorMessage: audio?.error?.message,
+              audioUrlExists: Boolean(audioUrl),
+            });
+          }}
+        />
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: "clamp(0.25rem, 1.2vw, 0.7rem)", minWidth: 0 }}>
         <button
           type="button"
           onClick={toggle}
-          disabled={!audioUrl}
+          disabled={disabled}
           aria-label={playing ? "Pause live audio" : "Resume live audio"}
           style={{
             fontFamily: VT,
             fontSize: "clamp(0.95rem, 4vw, 1.35rem)",
-            color: audioUrl ? "#FFFFFF" : "rgba(255,255,255,0.28)",
+            color: disabled ? "rgba(255,255,255,0.28)" : "#FFFFFF",
             background: "none",
             border: "none",
             padding: 0,
@@ -356,11 +572,16 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
         >
           {playing ? "■" : "▶"}
         </button>
+        {sourceLabel && (
+          <span style={{ fontFamily: VT, color: sourceStatus === "error" ? "#ff5c5c" : "rgba(0,255,65,0.55)", fontSize: "0.95rem", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>
+            {sourceLabel}
+          </span>
+        )}
         <div
           role="progressbar"
           aria-label={`Live audio position ${fmtSecs(Math.floor(progress))}`}
           aria-valuemin={0}
-          aria-valuemax={duration || 0}
+          aria-valuemax={usableDuration || 0}
           aria-valuenow={progress}
           style={{ minWidth: "2.25rem", flex: "1 1 auto", height: "2px", background: "rgba(0,255,65,0.18)", position: "relative", pointerEvents: "none" }}
         >
@@ -446,6 +667,7 @@ function removeLegacyChatIdentity() {
 export default function PublicEventPage() {
   const { event, loading, error } = useCurrentEvent();
   const [audioUrl, setAudioUrl] = useState("");
+  const [audioSourceStatus, setAudioSourceStatus] = useState<AudioSourceStatus>("idle");
   const [now, setNow] = useState(new Date());
   const previousEventId = useRef<string | null>(null);
   const state = event ? getEventDisplayState(event, now) : "upcoming";
@@ -480,6 +702,7 @@ export default function PublicEventPage() {
   useEffect(() => {
     let active = true;
     setAudioUrl("");
+    setAudioSourceStatus("idle");
 
     if (state !== "live") {
       return () => {
@@ -488,21 +711,57 @@ export default function PublicEventPage() {
     }
 
     if (!event?.audio_path) {
+      console.error("Live audio source unavailable", {
+        eventId: event?.id ?? null,
+        hasAudioPath: false,
+      });
+      setAudioSourceStatus("error");
       return () => {
         active = false;
       };
     }
 
+    setAudioSourceStatus("loading");
+    console.info("Requesting live audio signed URL", {
+      eventId: event.id,
+      hasAudioPath: true,
+    });
+
     getSignedAudioUrl(event?.audio_path)
       .then(url => {
-        if (active) setAudioUrl(url);
+        if (!active) return;
+        if (!url) {
+          setAudioSourceStatus("error");
+          console.error("Live audio signed URL failed", {
+            eventId: event.id,
+            hasAudioPath: true,
+            errorName: "EmptySignedUrl",
+            errorMessage: "Signed audio URL request returned an empty URL.",
+          });
+          return;
+        }
+        setAudioUrl(url);
+        setAudioSourceStatus("ready");
+        console.info("Live audio signed URL ready", {
+          eventId: event.id,
+          hasAudioPath: true,
+          receivedAudioUrl: Boolean(url),
+          audioUrlPath: sanitizeUrlForLog(url),
+        });
       })
-      .catch(() => {});
+      .catch(err => {
+        console.error("Live audio signed URL failed", {
+          eventId: event.id,
+          hasAudioPath: true,
+          ...getErrorLogInfo(err),
+        });
+        if (active) setAudioSourceStatus("error");
+      });
 
     return () => {
       active = false;
     };
-  }, [event?.audio_path, state]);
+  }, [event?.audio_path, event?.id, state]);
 
   const images = useMemo(() => ({
     artwork: getPublicImageUrl("artwork", event?.artwork_path),
@@ -536,6 +795,7 @@ export default function PublicEventPage() {
           artistName={event.artist_name || "artist"}
           artistUrl={images.artist}
           audioUrl={audioUrl}
+          audioSourceStatus={audioSourceStatus}
           startsAt={event.starts_at}
           liveTarget={countdownTarget}
           eventId={event.id}
@@ -673,7 +933,7 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
   );
 }
 
-function LiveEventView({ title, artistName, artistUrl, audioUrl, startsAt, liveTarget, eventId, messages, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
+function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, startsAt, liveTarget, eventId, messages, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
   const joinedNameKey = getEventChatNameKey(eventId);
   const [joinedName, setJoinedName] = useState("");
 
@@ -684,7 +944,7 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, startsAt, liveT
   return (
     <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", padding: "2.2rem 1.75rem 1.25rem" }}>
       <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
-        <LiveAudioHeader title={title} audioUrl={audioUrl} startsAt={startsAt} liveTarget={liveTarget} />
+        <LiveAudioHeader title={title} audioUrl={audioUrl} audioSourceStatus={audioSourceStatus} startsAt={startsAt} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
         <LiveMessageStream messages={messages} joined={Boolean(joinedName)} eventId={eventId} artistName={artistName} artistUrl={artistUrl} />
         <BouncingArtistPortrait imageUrl={artistUrl} />
@@ -703,14 +963,14 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, startsAt, liveT
   );
 }
 
-function LiveAudioHeader({ title, audioUrl, startsAt, liveTarget }: { title: string; audioUrl: string; startsAt: string | null; liveTarget: string | null }) {
+function LiveAudioHeader({ title, audioUrl, audioSourceStatus, startsAt, liveTarget }: { title: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; startsAt: string | null; liveTarget: string | null }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "clamp(0.25rem, 1.5vw, 1rem)", width: "100%", minWidth: 0, flexWrap: "nowrap", overflow: "hidden" }}>
       <p style={{ fontFamily: VT, fontSize: "clamp(0.95rem, 3.4vw, 1.85rem)", color: "rgba(255,255,255,0.38)", letterSpacing: "0.04em", minWidth: 0, flex: "0 1 clamp(4.25rem, 24vw, 18ch)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {title}
       </p>
       <div style={{ minWidth: "4.5rem", flex: "1 1 5rem" }}>
-        <AudioPlayer audioUrl={audioUrl} startsAt={startsAt} />
+        <AudioPlayer audioUrl={audioUrl} sourceStatus={audioSourceStatus} startsAt={startsAt} />
       </div>
       <CompactLiveCountdown target={liveTarget} />
     </div>
@@ -755,7 +1015,6 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl }:
 
 function ChatMessageBubble({ message, joined, eventId, artistName, artistUrl, pinnedArea = false }: { message: ChatMessage; joined: boolean; eventId: string; artistName: string; artistUrl: string; pinnedArea?: boolean }) {
   const displayName = message.is_admin ? artistName : message.display_name;
-  const showAvatar = joined || message.is_admin;
   const labels = getPublicMessageLabels(message);
 
   return (
@@ -763,16 +1022,14 @@ function ChatMessageBubble({ message, joined, eventId, artistName, artistUrl, pi
       maxWidth: pinnedArea ? "100%" : joined ? "min(88%, 620px)" : "88%",
       display: "flex",
       alignItems: "flex-start",
-      gap: showAvatar ? "0.55rem" : 0,
+      gap: "0.55rem",
       borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
       padding: joined ? "0.45rem 0 0.45rem 0.65rem" : "0.25rem 0 0.25rem 0.65rem",
       background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
     }}>
-      {showAvatar && (
-        message.is_admin
-          ? <ArtistMessageAvatar artistUrl={artistUrl} />
-          : <ChatAvatar eventId={eventId} name={message.display_name} />
-      )}
+      {message.is_admin
+        ? <ArtistMessageAvatar artistUrl={artistUrl} />
+        : <ChatAvatar eventId={eventId} name={message.display_name} />}
       <div style={{ minWidth: 0 }}>
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em", overflowWrap: "anywhere" }}>
           {displayName}{labels.length > 0 ? ` ${labels.join(" ")}` : ""}
