@@ -66,6 +66,7 @@ assert(localSelected.toISOString() === "2026-07-11T14:36:00.000Z", "Local 16:36 
 assert(localSelected.getHours() === 16 && localSelected.getMinutes() === 36, "Stored UTC should display back as local 16:36.");
 
 const publicPage = readFileSync("src/pages/PublicEventPage.tsx", "utf8");
+const storageService = readFileSync("src/services/storageService.ts", "utf8");
 assert(publicPage.includes('if (state !== "live")'), "Public page must not request audio while upcoming.");
 assert(publicPage.includes("<AudioPlayer audioUrl={audioUrl}") && publicPage.includes("sourceStatus={audioSourceStatus}") && publicPage.includes("startsAt={startsAt}"), "Live must keep the audio controls mounted in the compact header with explicit audio-source state.");
 assert(publicPage.includes('aria-label={playing ? "Pause live audio" : "Resume live audio"}'), "Live play control must remain an accessible resume/pause control.");
@@ -75,6 +76,17 @@ assert(publicPage.includes("getUsableDuration") && publicPage.includes("audioRef
 assert(publicPage.includes("readyState >= HTMLMediaElement.HAVE_METADATA"), "Live audio must initialize already-loaded metadata.");
 assert(publicPage.includes('sourceStatus === "loading"') && publicPage.includes('sourceStatus === "error"') && publicPage.includes("audio unavailable"), "Live audio must expose loading and unavailable signed-URL states.");
 assert(publicPage.includes("Live audio signed URL failed") && publicPage.includes("sanitizeUrlForLog"), "Signed URL failures must be logged safely instead of swallowed.");
+assert(storageService.includes("async function requestSignedAudioUrlViaRest"), "Signed audio URLs must be requested through the HTTP-level REST helper.");
+assert(storageService.includes("new AbortController()") && storageService.includes("options.timeoutMs ?? 15000"), "Signed audio URL requests must have an abortable 15s timeout.");
+assert(storageService.includes('cache: "no-store"') && storageService.includes('credentials: "omit"'), "Signed audio URL requests must avoid stale caches and use explicit credentials mode.");
+assert(storageService.includes('response.headers.get("content-type")') && storageService.includes("response.status") && storageService.includes("sanitizeResponseTextForLog"), "Signed audio URL diagnostics must include HTTP status, content type, and sanitized response body.");
+assert(storageService.includes("Storage signing response was not valid JSON"), "Malformed signing responses must throw a useful error.");
+assert(storageService.includes("Storage signing response did not include a signed URL"), "Signing responses without URLs must throw a useful error.");
+assert(storageService.includes("!response.ok") && storageService.includes("Storage signing failed with HTTP"), "Non-2xx signing responses must throw a useful error.");
+assert(storageService.includes("SignedAudioUrlTimeoutError"), "Signing timeout must use a recognizable timeout error.");
+assert(storageService.includes("return {") && storageService.includes("signedUrl,") && storageService.includes("status: response.status"), "Successful signing must return the signed URL with HTTP diagnostics.");
+assert(publicPage.includes("setAudioUrl skipped because signing result is stale") && publicPage.includes("resultIgnoredReason"), "Stale signing results must not overwrite newer audio state.");
+assert(publicPage.includes("audio.play()") && publicPage.includes("Live audio playback failed"), "Live audio play() promise rejections must be caught and logged.");
 assert(publicPage.includes("const disabled = !audioUrl;"), "Resume must be enabled as soon as a signed audio URL exists.");
 assert(publicPage.includes("nativeAudioTest") && publicPage.includes("function NativeAudioTestPlayer") && publicPage.includes("controls") && publicPage.includes("AUDIO ELEMENT MOUNTED"), "Native audio test mode must be available behind the diagnostic query string.");
 assert(publicPage.includes('type="button"') && publicPage.includes('width: "2.75rem"') && publicPage.includes('pointerEvents: "auto"') && publicPage.includes('touchAction: "manipulation"'), "Live play control must stay tappable on mobile.");
