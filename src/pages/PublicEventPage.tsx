@@ -3,7 +3,15 @@ import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemaining
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
 import { getVisitorMessageStatus, sendVisitorMessage } from "@/services/chatService";
-import { getPublicImageUrl, getSignedAudioUrl } from "@/services/storageService";
+import {
+  getAudioObjectPath,
+  getPublicImageUrl,
+  getSafeSupabaseSessionState,
+  getSignedAudioUrl,
+  getSignedAudioUrlViaRestDiagnostic,
+  getSupabaseProjectHost,
+  SignedAudioUrlTimeoutError,
+} from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
 import type { MusicEvent } from "@/types/event";
 
@@ -15,7 +23,7 @@ const PSP = "'Press Start 2P', cursive";
 type DisplayState = "upcoming" | "live" | "finished";
 type AudioSourceStatus = "idle" | "loading" | "ready" | "error";
 type AudioSigningEffectStatus = "idle" | "entered" | "skipped";
-type AudioSigningRequestStatus = "idle" | "loading" | "resolved" | "rejected";
+type AudioSigningRequestStatus = "idle" | "loading" | "resolved" | "rejected" | "timed-out" | "cancelled";
 
 type AudioUrlPipelineDiagnostics = {
   eventId: string | null;
@@ -28,6 +36,20 @@ type AudioUrlPipelineDiagnostics = {
   finalAudioUrlPresent: boolean;
   lastSafeErrorMessage: string;
   sourceIdentity: string;
+  requestId: number | null;
+  requestStartedAt: string;
+  requestElapsedMs: number | null;
+  retryCount: number;
+  sessionState: string;
+  online: boolean | null;
+  resultIgnored: boolean;
+  resultIgnoredReason: string;
+  normalizedAudioPath: string | null;
+  projectHost: string;
+  directRestState: string;
+  directRestElapsedMs: number | null;
+  directRestAudioUrlPresent: boolean;
+  directRestError: string;
 };
 
 const CHAT_NAME_KEY_PREFIX = "music-event-chat-name:";
@@ -343,6 +365,19 @@ function NativeAudioTestPlayer({ audioUrl, sourceStatus, pipelineDiagnostics }: 
     ["event audio path present", pipelineDiagnostics.audioPathPresent ? "yes" : "no"],
     ["signing effect", pipelineDiagnostics.signingEffect],
     ["signing request", pipelineDiagnostics.signingRequest],
+    ["request ID", pipelineDiagnostics.requestId === null ? "none" : String(pipelineDiagnostics.requestId)],
+    ["started", pipelineDiagnostics.requestStartedAt || "none"],
+    ["elapsed ms", pipelineDiagnostics.requestElapsedMs === null ? "n/a" : String(pipelineDiagnostics.requestElapsedMs)],
+    ["retry count", String(pipelineDiagnostics.retryCount)],
+    ["session", pipelineDiagnostics.sessionState],
+    ["online", pipelineDiagnostics.online === null ? "unknown" : pipelineDiagnostics.online ? "yes" : "no"],
+    ["result ignored", pipelineDiagnostics.resultIgnored ? `yes: ${pipelineDiagnostics.resultIgnoredReason}` : "no"],
+    ["normalized path", pipelineDiagnostics.normalizedAudioPath ?? "none"],
+    ["project host", pipelineDiagnostics.projectHost || "unknown"],
+    ["direct REST state", pipelineDiagnostics.directRestState],
+    ["direct REST elapsed ms", pipelineDiagnostics.directRestElapsedMs === null ? "n/a" : String(pipelineDiagnostics.directRestElapsedMs)],
+    ["direct REST URL present", pipelineDiagnostics.directRestAudioUrlPresent ? "yes" : "no"],
+    ["direct REST error", pipelineDiagnostics.directRestError || "none"],
     ["final audio URL present", pipelineDiagnostics.finalAudioUrlPresent ? "yes" : "no"],
     ["last safe error", pipelineDiagnostics.lastSafeErrorMessage || "none"],
     ["source identity", pipelineDiagnostics.sourceIdentity],
@@ -699,6 +734,7 @@ function getAudioSourceKey(eventId: string | null, audioPath: string | null) {
 
 export default function PublicEventPage() {
   const { event, loading, error } = useCurrentEvent();
+  const nativeAudioTest = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("nativeAudioTest") === "1";
   const [audioUrl, setAudioUrl] = useState("");
   const [audioSourceStatus, setAudioSourceStatus] = useState<AudioSourceStatus>("idle");
   const [audioPipelineDiagnostics, setAudioPipelineDiagnostics] = useState<AudioUrlPipelineDiagnostics>({
@@ -712,6 +748,20 @@ export default function PublicEventPage() {
     finalAudioUrlPresent: false,
     lastSafeErrorMessage: "",
     sourceIdentity: getAudioSourceIdentity(null, null),
+    requestId: null,
+    requestStartedAt: "",
+    requestElapsedMs: null,
+    retryCount: 0,
+    sessionState: "unknown",
+    online: null,
+    resultIgnored: false,
+    resultIgnoredReason: "",
+    normalizedAudioPath: null,
+    projectHost: "",
+    directRestState: "idle",
+    directRestElapsedMs: null,
+    directRestAudioUrlPresent: false,
+    directRestError: "",
   });
   const [now, setNow] = useState(new Date());
   const previousEventId = useRef<string | null>(null);
@@ -720,6 +770,7 @@ export default function PublicEventPage() {
   const audioSourceRef = useRef<{ eventId: string | null; audioPath: string | null }>({ eventId: null, audioPath: null });
   const activeAudioSourceKeyRef = useRef("");
   const signedAudioCache = useRef<{ eventId: string; audioPath: string; url: string } | null>(null);
+  const inFlightSigningRequests = useRef<Map<string, Promise<string>>>(new Map());
   const state = event ? getEventDisplayState(event, now) : "upcoming";
   const authoritativeState = event?.status ?? "upcoming";
   const waitingForLiveStatus = state === "live" && authoritativeState === "upcoming";
@@ -772,6 +823,13 @@ export default function PublicEventPage() {
     const audioPath = event?.audio_path?.trim() || "";
     const sourceIdentity = getAudioSourceIdentity(eventId, audioPath || null);
     const sourceKey = getAudioSourceKey(eventId, audioPath || null);
+    let normalizedAudioPath: string | null = null;
+    let normalizationError = "";
+    try {
+      normalizedAudioPath = audioPath ? getAudioObjectPath(audioPath) : null;
+    } catch (err) {
+      normalizationError = err instanceof Error ? err.message : String(err);
+    }
     const sameEventAsCurrentSource = eventId && audioSourceRef.current.eventId === eventId;
     const sameSourceAsCurrentUrl = sameEventAsCurrentSource && audioSourceRef.current.audioPath === audioPath;
 
@@ -784,6 +842,8 @@ export default function PublicEventPage() {
         audioPath: audioPath || null,
         audioPathPresent: Boolean(audioPath),
         sourceIdentity,
+        normalizedAudioPath,
+        projectHost: getSupabaseProjectHost(),
         finalAudioUrlPresent: Boolean(audioUrlRef.current),
         ...partial,
       }));
@@ -864,6 +924,23 @@ export default function PublicEventPage() {
       };
     }
 
+    if (normalizationError || !normalizedAudioPath) {
+      audioSigningRequestId.current += 1;
+      setAudioSourceStatus("error");
+      updatePipeline({
+        signingRequest: "rejected",
+        lastSafeErrorMessage: normalizationError || "Live event audio_path could not be normalized.",
+      });
+      console.error("Live audio source path is invalid", {
+        eventId,
+        hasAudioPath: true,
+        errorMessage: normalizationError || "Live event audio_path could not be normalized.",
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     if (sameSourceAsCurrentUrl && audioUrlRef.current) {
       logAudioUrlPipeline("reusing existing audioUrl for same event/path", {
         eventId,
@@ -911,15 +988,82 @@ export default function PublicEventPage() {
     const requestId = audioSigningRequestId.current + 1;
     audioSigningRequestId.current = requestId;
     activeAudioSourceKeyRef.current = sourceKey;
+    const requestStartedAt = Date.now();
     setAudioSourceStatus("loading");
-    updatePipeline({ signingRequest: "loading" });
+    updatePipeline({
+      signingRequest: "loading",
+      requestId,
+      requestStartedAt: new Date(requestStartedAt).toISOString(),
+      requestElapsedMs: 0,
+      retryCount: 0,
+      resultIgnored: false,
+      resultIgnoredReason: "",
+      directRestState: nativeAudioTest ? "loading" : "idle",
+      directRestElapsedMs: null,
+      directRestAudioUrlPresent: false,
+      directRestError: "",
+    });
+
+    getSafeSupabaseSessionState().then(sessionState => {
+      if (cancelled || requestId !== audioSigningRequestId.current || sourceKey !== activeAudioSourceKeyRef.current) return;
+      updatePipeline({
+        sessionState: sessionState.session,
+        online: sessionState.online,
+        projectHost: sessionState.projectHost,
+        lastSafeErrorMessage: sessionState.errorMessage || "",
+      });
+      logAudioUrlPipeline("safe session state before signing", {
+        eventId,
+        eventStatus,
+        state,
+        sourceKey,
+        requestId,
+        session: sessionState.session,
+        getSessionResolved: sessionState.getSessionResolved,
+        clientInitialized: sessionState.clientInitialized,
+        online: sessionState.online,
+        visibilityState: sessionState.visibilityState,
+        projectHost: sessionState.projectHost,
+        sessionError: sessionState.errorMessage,
+      });
+    });
+
+    if (nativeAudioTest) {
+      getSignedAudioUrlViaRestDiagnostic(audioPath)
+        .then(result => {
+          if (cancelled || requestId !== audioSigningRequestId.current || sourceKey !== activeAudioSourceKeyRef.current) return;
+          updatePipeline({
+            directRestState: result.state,
+            directRestElapsedMs: result.elapsedMs,
+            directRestAudioUrlPresent: result.signedUrlPresent,
+            directRestError: result.errorMessage,
+          });
+        })
+        .catch(err => {
+          if (cancelled || requestId !== audioSigningRequestId.current || sourceKey !== activeAudioSourceKeyRef.current) return;
+          const errorInfo = getErrorLogInfo(err);
+          updatePipeline({
+            directRestState: "rejected",
+            directRestElapsedMs: Date.now() - requestStartedAt,
+            directRestAudioUrlPresent: false,
+            directRestError: errorInfo.errorMessage,
+          });
+        });
+    }
 
     const signAudioUrl = (attempt: 1 | 2) => {
+      const attemptStartedAt = Date.now();
+      updatePipeline({
+        signingRequest: "loading",
+        retryCount: attempt - 1,
+        requestElapsedMs: Date.now() - requestStartedAt,
+      });
       logAudioUrlPipeline("getSignedAudioUrl called", {
         eventId,
         eventStatus,
         state,
         audioPath,
+        normalizedAudioPath,
         sourceKey,
         requestId,
         attempt,
@@ -931,26 +1075,59 @@ export default function PublicEventPage() {
         attempt,
       });
 
-      getSignedAudioUrl(audioPath)
+      let signingPromise = inFlightSigningRequests.current.get(sourceKey);
+      if (!signingPromise) {
+        signingPromise = getSignedAudioUrl(audioPath, 3600, {
+          requestId,
+          attempt,
+          eventId,
+          sourceKey,
+          timeoutMs: 10000,
+          startedAt: attemptStartedAt,
+        });
+        inFlightSigningRequests.current.set(sourceKey, signingPromise);
+        const clearInFlight = () => {
+          if (inFlightSigningRequests.current.get(sourceKey) === signingPromise) {
+            inFlightSigningRequests.current.delete(sourceKey);
+          }
+        };
+        signingPromise.then(clearInFlight, clearInFlight);
+      } else {
+        logAudioUrlPipeline("reusing in-flight signed URL request", {
+          eventId,
+          eventStatus,
+          state,
+          audioPath,
+          sourceKey,
+          requestId,
+          attempt,
+        });
+      }
+
+      signingPromise
         .then(url => {
           const isLatestRequest = requestId === audioSigningRequestId.current;
           const isCurrentSource = sourceKey === activeAudioSourceKeyRef.current;
+          const ignored = cancelled || !isLatestRequest || !isCurrentSource;
+          const ignoredReason = cancelled ? "effect cleanup ran" : !isLatestRequest ? "newer request exists" : !isCurrentSource ? "source key changed" : "";
           logAudioUrlPipeline("getSignedAudioUrl resolved", {
             eventId,
             eventStatus,
             state,
             audioPath,
+            normalizedAudioPath,
             sourceKey,
             activeSourceKey: activeAudioSourceKeyRef.current,
             requestId,
             attempt,
+            elapsedMs: Date.now() - attemptStartedAt,
             resolvedAudioUrlPresent: Boolean(url),
             resolvedAudioUrlPath: sanitizeUrlForLog(url),
             effectStillActive: !cancelled,
             isLatestRequest,
             isCurrentSource,
           });
-          if (cancelled || !isLatestRequest || !isCurrentSource) {
+          if (ignored) {
             logAudioUrlPipeline("setAudioUrl skipped because signing result is stale", {
               eventId,
               eventStatus,
@@ -961,6 +1138,12 @@ export default function PublicEventPage() {
               requestId,
               attempt,
               resolvedAudioUrlPresent: Boolean(url),
+              ignoredReason,
+            });
+            updatePipeline({
+              resultIgnored: true,
+              resultIgnoredReason: ignoredReason,
+              requestElapsedMs: Date.now() - requestStartedAt,
             });
             return;
           }
@@ -972,6 +1155,7 @@ export default function PublicEventPage() {
             setAudioSourceStatus("error");
             updatePipeline({
               signingRequest: "rejected",
+              requestElapsedMs: Date.now() - requestStartedAt,
               lastSafeErrorMessage: "Signed audio URL request returned an empty URL.",
             });
             console.error("Live audio signed URL failed", {
@@ -997,7 +1181,12 @@ export default function PublicEventPage() {
           activeAudioSourceKeyRef.current = sourceKey;
           setAudioUrl(url);
           setAudioSourceStatus("ready");
-          updatePipeline({ signingRequest: "resolved", finalAudioUrlPresent: true });
+          updatePipeline({
+            signingRequest: "resolved",
+            finalAudioUrlPresent: true,
+            requestElapsedMs: Date.now() - requestStartedAt,
+            lastSafeErrorMessage: "",
+          });
           console.info("Live audio signed URL ready", {
             eventId,
             hasAudioPath: true,
@@ -1008,23 +1197,42 @@ export default function PublicEventPage() {
         .catch(err => {
           const isLatestRequest = requestId === audioSigningRequestId.current;
           const isCurrentSource = sourceKey === activeAudioSourceKeyRef.current;
+          const ignored = cancelled || !isLatestRequest || !isCurrentSource;
+          const ignoredReason = cancelled ? "effect cleanup ran" : !isLatestRequest ? "newer request exists" : !isCurrentSource ? "source key changed" : "";
           const errorInfo = getErrorLogInfo(err);
+          const timedOut = err instanceof SignedAudioUrlTimeoutError;
           logAudioUrlPipeline("getSignedAudioUrl rejects", {
             eventId,
             eventStatus,
             state,
             audioPath,
+            normalizedAudioPath,
             sourceKey,
             activeSourceKey: activeAudioSourceKeyRef.current,
             requestId,
             attempt,
+            elapsedMs: Date.now() - attemptStartedAt,
+            timedOut,
             ...errorInfo,
             effectStillActive: !cancelled,
             isLatestRequest,
             isCurrentSource,
           });
-          if (cancelled || !isLatestRequest || !isCurrentSource) return;
+          if (ignored) {
+            updatePipeline({
+              resultIgnored: true,
+              resultIgnoredReason: ignoredReason,
+              requestElapsedMs: Date.now() - requestStartedAt,
+            });
+            return;
+          }
           if (attempt === 1) {
+            updatePipeline({
+              signingRequest: timedOut ? "timed-out" : "rejected",
+              retryCount: 1,
+              requestElapsedMs: Date.now() - requestStartedAt,
+              lastSafeErrorMessage: errorInfo.errorMessage,
+            });
             signAudioUrl(2);
             return;
           }
@@ -1048,7 +1256,8 @@ export default function PublicEventPage() {
           });
           setAudioSourceStatus("error");
           updatePipeline({
-            signingRequest: "rejected",
+            signingRequest: timedOut ? "timed-out" : "rejected",
+            requestElapsedMs: Date.now() - requestStartedAt,
             lastSafeErrorMessage: errorInfo.errorMessage,
           });
         });
@@ -1058,8 +1267,18 @@ export default function PublicEventPage() {
 
     return () => {
       cancelled = true;
+      logAudioUrlPipeline("effect cleanup ran", {
+        eventId,
+        eventStatus,
+        state,
+        audioPath,
+        sourceKey,
+        requestId,
+        activeRequestId: audioSigningRequestId.current,
+        activeSourceKey: activeAudioSourceKeyRef.current,
+      });
     };
-  }, [event?.audio_path, event?.id, event?.status, state]);
+  }, [event?.audio_path, event?.id, event?.status, nativeAudioTest, state]);
 
   const images = useMemo(() => ({
     artwork: getPublicImageUrl("artwork", event?.artwork_path),
