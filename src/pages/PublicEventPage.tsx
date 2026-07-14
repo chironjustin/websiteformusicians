@@ -693,6 +693,10 @@ function getAudioSourceIdentity(eventId: string | null, audioPath: string | null
   return `${eventId ?? "no-event"}:${audioPath || "no-audio-path"}`;
 }
 
+function getAudioSourceKey(eventId: string | null, audioPath: string | null) {
+  return eventId && audioPath ? `${eventId}::${audioPath}` : "";
+}
+
 export default function PublicEventPage() {
   const { event, loading, error } = useCurrentEvent();
   const [audioUrl, setAudioUrl] = useState("");
@@ -714,6 +718,7 @@ export default function PublicEventPage() {
   const audioSigningRequestId = useRef(0);
   const audioUrlRef = useRef("");
   const audioSourceRef = useRef<{ eventId: string | null; audioPath: string | null }>({ eventId: null, audioPath: null });
+  const activeAudioSourceKeyRef = useRef("");
   const signedAudioCache = useRef<{ eventId: string; audioPath: string; url: string } | null>(null);
   const state = event ? getEventDisplayState(event, now) : "upcoming";
   const authoritativeState = event?.status ?? "upcoming";
@@ -766,6 +771,7 @@ export default function PublicEventPage() {
     const eventStatus = event?.status ?? null;
     const audioPath = event?.audio_path?.trim() || "";
     const sourceIdentity = getAudioSourceIdentity(eventId, audioPath || null);
+    const sourceKey = getAudioSourceKey(eventId, audioPath || null);
     const sameEventAsCurrentSource = eventId && audioSourceRef.current.eventId === eventId;
     const sameSourceAsCurrentUrl = sameEventAsCurrentSource && audioSourceRef.current.audioPath === audioPath;
 
@@ -789,6 +795,8 @@ export default function PublicEventPage() {
       state,
       audioPath: audioPath || null,
       hasAudioPath: Boolean(audioPath),
+      sourceKey,
+      activeSourceKey: activeAudioSourceKeyRef.current,
       currentAudioUrlPresent: Boolean(audioUrlRef.current),
       currentSourceIdentity: getAudioSourceIdentity(audioSourceRef.current.eventId, audioSourceRef.current.audioPath),
     });
@@ -805,6 +813,7 @@ export default function PublicEventPage() {
       });
       if (audioUrlRef.current) setAudioUrl("");
       audioSourceRef.current = { eventId: null, audioPath: null };
+      activeAudioSourceKeyRef.current = "";
       setAudioSourceStatus("idle");
       updatePipeline({ signingEffect: "skipped", signingRequest: "idle" });
       return () => {
@@ -816,6 +825,7 @@ export default function PublicEventPage() {
       audioSigningRequestId.current += 1;
       if (audioUrlRef.current) setAudioUrl("");
       audioSourceRef.current = { eventId: null, audioPath: null };
+      activeAudioSourceKeyRef.current = "";
       setAudioSourceStatus("error");
       updatePipeline({
         signingEffect: "skipped",
@@ -879,6 +889,7 @@ export default function PublicEventPage() {
         audioUrlPath: sanitizeUrlForLog(cached.url),
       });
       audioSourceRef.current = { eventId, audioPath };
+      activeAudioSourceKeyRef.current = sourceKey;
       if (audioUrlRef.current !== cached.url) {
         logAudioUrlPipeline("setAudioUrl executes from cache", {
           eventId,
@@ -899,6 +910,7 @@ export default function PublicEventPage() {
 
     const requestId = audioSigningRequestId.current + 1;
     audioSigningRequestId.current = requestId;
+    activeAudioSourceKeyRef.current = sourceKey;
     setAudioSourceStatus("loading");
     updatePipeline({ signingRequest: "loading" });
 
@@ -908,6 +920,7 @@ export default function PublicEventPage() {
         eventStatus,
         state,
         audioPath,
+        sourceKey,
         requestId,
         attempt,
       });
@@ -921,24 +934,30 @@ export default function PublicEventPage() {
       getSignedAudioUrl(audioPath)
         .then(url => {
           const isLatestRequest = requestId === audioSigningRequestId.current;
+          const isCurrentSource = sourceKey === activeAudioSourceKeyRef.current;
           logAudioUrlPipeline("getSignedAudioUrl resolved", {
             eventId,
             eventStatus,
             state,
             audioPath,
+            sourceKey,
+            activeSourceKey: activeAudioSourceKeyRef.current,
             requestId,
             attempt,
             resolvedAudioUrlPresent: Boolean(url),
             resolvedAudioUrlPath: sanitizeUrlForLog(url),
             effectStillActive: !cancelled,
             isLatestRequest,
+            isCurrentSource,
           });
-          if (cancelled || !isLatestRequest) {
+          if (cancelled || !isLatestRequest || !isCurrentSource) {
             logAudioUrlPipeline("setAudioUrl skipped because signing result is stale", {
               eventId,
               eventStatus,
               state,
               audioPath,
+              sourceKey,
+              activeSourceKey: activeAudioSourceKeyRef.current,
               requestId,
               attempt,
               resolvedAudioUrlPresent: Boolean(url),
@@ -975,6 +994,7 @@ export default function PublicEventPage() {
           });
           signedAudioCache.current = { eventId, audioPath, url };
           audioSourceRef.current = { eventId, audioPath };
+          activeAudioSourceKeyRef.current = sourceKey;
           setAudioUrl(url);
           setAudioSourceStatus("ready");
           updatePipeline({ signingRequest: "resolved", finalAudioUrlPresent: true });
@@ -987,21 +1007,38 @@ export default function PublicEventPage() {
         })
         .catch(err => {
           const isLatestRequest = requestId === audioSigningRequestId.current;
+          const isCurrentSource = sourceKey === activeAudioSourceKeyRef.current;
           const errorInfo = getErrorLogInfo(err);
           logAudioUrlPipeline("getSignedAudioUrl rejects", {
             eventId,
             eventStatus,
             state,
             audioPath,
+            sourceKey,
+            activeSourceKey: activeAudioSourceKeyRef.current,
             requestId,
             attempt,
             ...errorInfo,
             effectStillActive: !cancelled,
             isLatestRequest,
+            isCurrentSource,
           });
-          if (cancelled || !isLatestRequest) return;
+          if (cancelled || !isLatestRequest || !isCurrentSource) return;
           if (attempt === 1) {
             signAudioUrl(2);
+            return;
+          }
+          if (audioUrlRef.current && sameSourceAsCurrentUrl) {
+            logAudioUrlPipeline("getSignedAudioUrl rejection ignored because current source already has audioUrl", {
+              eventId,
+              eventStatus,
+              state,
+              audioPath,
+              sourceKey,
+              requestId,
+              attempt,
+              ...errorInfo,
+            });
             return;
           }
           console.error("Live audio signed URL failed", {
@@ -1213,6 +1250,17 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
     setJoinedName(window.localStorage.getItem(joinedNameKey) ?? "");
   }, [joinedNameKey]);
 
+  useEffect(() => {
+    console.info("[live-chat-join-state]", {
+      eventId,
+      joined: Boolean(joinedName),
+      sourceIdentity: audioPipelineDiagnostics.sourceIdentity,
+      audioPathPresent: audioPipelineDiagnostics.audioPathPresent,
+      finalAudioUrlPresent: audioPipelineDiagnostics.finalAudioUrlPresent,
+      signingRequest: audioPipelineDiagnostics.signingRequest,
+    });
+  }, [audioPipelineDiagnostics.audioPathPresent, audioPipelineDiagnostics.finalAudioUrlPresent, audioPipelineDiagnostics.signingRequest, audioPipelineDiagnostics.sourceIdentity, eventId, joinedName]);
+
   return (
     <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", padding: "2.2rem 1.75rem 1.25rem" }}>
       <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
@@ -1391,6 +1439,11 @@ function JoinChatPanel({ eventId, storageKey, onJoin }: { eventId: string; stora
       return;
     }
     window.localStorage.setItem(storageKey, name);
+    console.info("[live-chat-join-state]", {
+      eventId,
+      joined: true,
+      action: "join-submitted",
+    });
     onJoin(name);
   }
 
