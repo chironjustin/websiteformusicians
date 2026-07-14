@@ -326,7 +326,7 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
 
   return (
     <div style={{ width: "100%", minWidth: "4.5rem" }}>
-      {audioUrl && <audio ref={audioRef} src={audioUrl} loop playsInline />}
+      {audioUrl && <audio ref={audioRef} src={audioUrl} loop playsInline preload="metadata" />}
       <div style={{ display: "flex", alignItems: "center", gap: "clamp(0.25rem, 1.2vw, 0.7rem)", minWidth: 0 }}>
         <button
           type="button"
@@ -341,15 +341,17 @@ function AudioPlayer({ audioUrl, startsAt }: { audioUrl: string; startsAt: strin
             border: "none",
             padding: 0,
             letterSpacing: "0.08em",
-            width: "clamp(1.7rem, 7vw, 2.25rem)",
-            minWidth: "1.7rem",
-            height: "clamp(1.7rem, 7vw, 2.25rem)",
+            width: "2.75rem",
+            minWidth: "2.75rem",
+            height: "2.75rem",
             display: "grid",
             placeItems: "center",
             flex: "0 0 auto",
             position: "relative",
-            zIndex: 2,
+            zIndex: 30,
+            pointerEvents: "auto",
             touchAction: "manipulation",
+            WebkitTapHighlightColor: "transparent",
           }}
         >
           {playing ? "■" : "▶"}
@@ -585,7 +587,7 @@ function ArtistPortrait({ imageUrl }: { imageUrl: string }) {
       background: "transparent",
       filter: "contrast(1.05) saturate(0.9)",
     }}>
-      <img src={src} alt="Artist" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", imageRendering: "pixelated", opacity: 0.82 }} />
+      <img src={src} alt="Artist" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", imageRendering: "pixelated", opacity: 0.82, pointerEvents: "none" }} />
     </div>
   );
 }
