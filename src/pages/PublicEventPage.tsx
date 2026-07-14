@@ -732,6 +732,16 @@ function getAudioSourceKey(eventId: string | null, audioPath: string | null) {
   return eventId && audioPath ? `${eventId}::${audioPath}` : "";
 }
 
+function getSafeAudioObjectPath(path: string | null | undefined) {
+  const rawAudioPath = path ?? "";
+  if (!rawAudioPath.trim()) return null;
+  try {
+    return getAudioObjectPath(rawAudioPath);
+  } catch {
+    return null;
+  }
+}
+
 export default function PublicEventPage() {
   const { event, loading, error } = useCurrentEvent();
   const nativeAudioTest = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("nativeAudioTest") === "1";
@@ -820,16 +830,18 @@ export default function PublicEventPage() {
     let cancelled = false;
     const eventId = event?.id ?? null;
     const eventStatus = event?.status ?? null;
-    const audioPath = event?.audio_path?.trim() || "";
-    const sourceIdentity = getAudioSourceIdentity(eventId, audioPath || null);
-    const sourceKey = getAudioSourceKey(eventId, audioPath || null);
+    const rawAudioPath = event?.audio_path ?? "";
+    const trimmedAudioPath = rawAudioPath.trim();
     let normalizedAudioPath: string | null = null;
     let normalizationError = "";
     try {
-      normalizedAudioPath = audioPath ? getAudioObjectPath(audioPath) : null;
+      normalizedAudioPath = trimmedAudioPath ? getAudioObjectPath(trimmedAudioPath) : null;
     } catch (err) {
       normalizationError = err instanceof Error ? err.message : String(err);
     }
+    const audioPath = normalizedAudioPath ?? trimmedAudioPath;
+    const sourceIdentity = getAudioSourceIdentity(eventId, audioPath || null);
+    const sourceKey = getAudioSourceKey(eventId, audioPath || null);
     const sameEventAsCurrentSource = eventId && audioSourceRef.current.eventId === eventId;
     const sameSourceAsCurrentUrl = sameEventAsCurrentSource && audioSourceRef.current.audioPath === audioPath;
 
@@ -1300,15 +1312,40 @@ export default function PublicEventPage() {
 
   const title = event.title.toLowerCase();
   const countdownTarget = getCountdownTarget(event, state);
+  const currentRawAudioPath = event.audio_path ?? "";
+  const currentNormalizedAudioPath = getSafeAudioObjectPath(currentRawAudioPath);
+  const currentAudioPath = (currentNormalizedAudioPath ?? currentRawAudioPath.trim()) || null;
+  const currentSourceIdentity = getAudioSourceIdentity(event.id, currentAudioPath);
+  const pipelineMatchesCurrentSource = audioPipelineDiagnostics.sourceIdentity === currentSourceIdentity;
+  const sourceScopedAudioPipelineDiagnostics: AudioUrlPipelineDiagnostics = pipelineMatchesCurrentSource
+    ? audioPipelineDiagnostics
+    : {
+      ...audioPipelineDiagnostics,
+      signingEffect: state === "live" ? "entered" : "idle",
+      signingRequest: state === "live" && currentAudioPath ? "loading" : "idle",
+      requestId: audioSigningRequestId.current || null,
+      requestStartedAt: "",
+      requestElapsedMs: null,
+      retryCount: 0,
+      resultIgnored: false,
+      resultIgnoredReason: "",
+      normalizedAudioPath: currentNormalizedAudioPath,
+      directRestState: nativeAudioTest && state === "live" && currentAudioPath ? "loading" : "idle",
+      directRestElapsedMs: null,
+      directRestAudioUrlPresent: false,
+      directRestError: "",
+      lastSafeErrorMessage: "",
+    };
   const currentAudioPipelineDiagnostics: AudioUrlPipelineDiagnostics = {
-    ...audioPipelineDiagnostics,
+    ...sourceScopedAudioPipelineDiagnostics,
     eventId: event.id,
     eventStatus: event.status,
     state,
-    audioPath: event.audio_path,
-    audioPathPresent: Boolean(event.audio_path),
+    audioPath: currentAudioPath,
+    audioPathPresent: Boolean(currentAudioPath),
+    normalizedAudioPath: currentNormalizedAudioPath,
     finalAudioUrlPresent: Boolean(audioUrl),
-    sourceIdentity: getAudioSourceIdentity(event.id, event.audio_path),
+    sourceIdentity: currentSourceIdentity,
   };
 
   return (
