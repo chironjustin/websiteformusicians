@@ -1820,8 +1820,6 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
       const message = await sendVisitorMessage({
         event_id: eventId,
         participant_id: identity.participantId,
-        display_name: identity.displayName,
-        avatar_id: identity.avatarId,
         body,
         client_token: clientToken,
       });

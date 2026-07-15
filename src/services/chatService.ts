@@ -1,9 +1,6 @@
 import { supabase } from "@/lib/supabase";
-import { getRandomInternationalFirstName } from "@/data/internationalFirstNames";
 import type { ChatMessage, ChatMessageStatus, ChatParticipant, CreateAdminChatMessageInput, CreateVisitorChatMessageInput } from "@/types/chat";
 
-export const CHAT_NAME_LENGTH_MESSAGE = "name must be 1–16 characters";
-export const CHAT_NAME_TAKEN_MESSAGE = "Name already taken - choose a different one.";
 export const USER_AVATAR_IDS = [
   "retro-1",
   "retro-2",
@@ -16,28 +13,11 @@ export const USER_AVATAR_IDS = [
 ] as const;
 
 const CHAT_SESSION_KEY = "music-event-chat-session-id";
-const MAX_DISPLAY_NAME = 16;
 const MAX_ADMIN_DISPLAY_NAME = 50;
 const MAX_BODY = 500;
 
 function cleanText(value: string, maxLength: number) {
   return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
-}
-
-function cleanDisplayName(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-export function normalizeChatName(value: string) {
-  return value
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLocaleLowerCase("en");
-}
-
-export function pickRandomUserAvatarId() {
-  const index = Math.floor(Math.random() * USER_AVATAR_IDS.length);
-  return USER_AVATAR_IDS[index] ?? USER_AVATAR_IDS[0];
 }
 
 export function isUserAvatarId(value: string | null | undefined): value is typeof USER_AVATAR_IDS[number] {
@@ -47,10 +27,6 @@ export function isUserAvatarId(value: string | null | undefined): value is typeo
 function assertBody(body: string) {
   if (!body) throw new Error("Message cannot be empty.");
   if (body.length > MAX_BODY) throw new Error("Message is too long.");
-}
-
-function assertDisplayName(displayName: string) {
-  if (!displayName || displayName.length > MAX_DISPLAY_NAME) throw new Error(CHAT_NAME_LENGTH_MESSAGE);
 }
 
 function assertEventId(eventId: string | null | undefined) {
@@ -63,11 +39,6 @@ export function getOrCreateChatSessionId() {
   const next = crypto.randomUUID();
   window.localStorage.setItem(CHAT_SESSION_KEY, next);
   return next;
-}
-
-function suffixGeneratedName(baseName: string) {
-  const suffix = String(Math.floor(Math.random() * 990) + 10);
-  return `${baseName.slice(0, Math.max(1, MAX_DISPLAY_NAME - suffix.length))}${suffix}`;
 }
 
 function orderedMessagesQuery() {
@@ -99,19 +70,14 @@ export async function getAdminChatMessages(eventId: string) {
 
 export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
   assertEventId(input.event_id);
-  const displayName = cleanDisplayName(input.display_name);
   const body = cleanText(input.body, MAX_BODY);
   const clientToken = input.client_token ?? crypto.randomUUID();
-  assertDisplayName(displayName);
   assertBody(body);
   if (!input.participant_id) throw new Error("A reserved chat identity is required.");
-  if (!isUserAvatarId(input.avatar_id)) throw new Error("A valid chat avatar is required.");
 
   const { data, error } = await supabase.rpc("submit_chat_message", {
-    p_avatar_id: input.avatar_id,
     p_body: body,
     p_client_token: clientToken,
-    p_display_name: displayName,
     p_event_id: input.event_id,
     p_participant_id: input.participant_id,
   });
@@ -120,61 +86,27 @@ export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
   return data as ChatMessage;
 }
 
-async function reserveGeneratedEventChatIdentity(input: { event_id: string; session_id: string; display_name: string; avatar_id: string }) {
+export async function joinEventChatIdentity(input: { event_id: string; session_id?: string }) {
   assertEventId(input.event_id);
-  const displayName = cleanDisplayName(input.display_name);
-  assertDisplayName(displayName);
+  const sessionId = input.session_id ?? getOrCreateChatSessionId();
 
-  const { data, error } = await supabase.rpc("reserve_event_chat_identity", {
-    p_avatar_id: input.avatar_id,
-    p_display_name: displayName,
+  const startedAt = performance.now();
+  const { data, error } = await supabase.rpc("join_event_chat", {
     p_event_id: input.event_id,
-    p_normalized_name: normalizeChatName(displayName),
-    p_session_id: input.session_id,
+    p_session_id: sessionId,
   });
 
   if (error) {
-    const message = error.message ?? "";
-    if (
-      message.includes("chat_name_taken")
-      || message.includes("duplicate key")
-      || message.includes("event_chat_participants_event_normalized_name_key")
-      || message.includes("event_chat_participants_event_normalized_name_idx")
-    ) {
-      throw new Error(CHAT_NAME_TAKEN_MESSAGE);
-    }
-    if (message.includes("chat_name_length")) {
-      throw new Error(CHAT_NAME_LENGTH_MESSAGE);
-    }
-    throw new Error(message);
+    console.error("[chat-join]", {
+      operation: "join_event_chat",
+      eventId: input.event_id,
+      code: error.code,
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+    throw new Error("Could not join the chat. Please try again.");
   }
 
   return data as ChatParticipant;
-}
-
-export async function joinEventChatIdentity(input: { event_id: string; session_id?: string; avatar_id?: string }) {
-  assertEventId(input.event_id);
-  const sessionId = input.session_id ?? getOrCreateChatSessionId();
-  const avatarId = isUserAvatarId(input.avatar_id) ? input.avatar_id : pickRandomUserAvatarId();
-  const baseName = getRandomInternationalFirstName().slice(0, MAX_DISPLAY_NAME);
-
-  try {
-    return await reserveGeneratedEventChatIdentity({
-      event_id: input.event_id,
-      session_id: sessionId,
-      display_name: baseName,
-      avatar_id: avatarId,
-    });
-  } catch (err) {
-    if (!(err instanceof Error) || err.message !== CHAT_NAME_TAKEN_MESSAGE) throw err;
-  }
-
-  return reserveGeneratedEventChatIdentity({
-    event_id: input.event_id,
-    session_id: sessionId,
-    display_name: suffixGeneratedName(baseName),
-    avatar_id: avatarId,
-  });
 }
 
 export async function getVisitorMessageStatus(eventId: string, messageId: string, clientToken: string) {
@@ -192,7 +124,7 @@ export async function sendAdminMessage(input: CreateAdminChatMessageInput) {
   assertEventId(input.event_id);
   const displayName = cleanText(input.display_name || "Admin", MAX_ADMIN_DISPLAY_NAME);
   const body = cleanText(input.body, MAX_BODY);
-  assertDisplayName(displayName);
+  if (!displayName) throw new Error("Display name is required.");
   assertBody(body);
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError || !userData.user) throw new Error("You must be signed in to send admin messages.");

@@ -9,6 +9,7 @@ create table if not exists public.event_chat_participants (
   normalized_name text not null,
   avatar_id text not null,
   created_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
   constraint event_chat_participants_display_name_length check (char_length(display_name) between 1 and 16),
   constraint event_chat_participants_normalized_name_length check (char_length(normalized_name) between 1 and 16),
   constraint event_chat_participants_avatar_id_check check (avatar_id in ('retro-1', 'retro-2', 'retro-3', 'retro-4', 'retro-5', 'retro-6', 'retro-7', 'retro-8'))
@@ -102,21 +103,9 @@ alter table public.event_chat_participants enable row level security;
 
 grant insert on public.chat_messages to authenticated;
 revoke insert on public.chat_messages from anon;
-grant select on public.event_chat_participants to anon, authenticated;
-revoke insert, update, delete on public.event_chat_participants from anon, authenticated;
+revoke select, insert, update, delete on public.event_chat_participants from anon, authenticated;
 
 drop policy if exists "Public can read live event chat participants" on public.event_chat_participants;
-create policy "Public can read live event chat participants"
-on public.event_chat_participants
-for select
-using (
-  exists (
-    select 1
-    from public.events
-    where events.id = event_chat_participants.event_id
-      and events.status in ('live', 'finished')
-  )
-);
 
 drop policy if exists "Public can read approved chat messages" on public.chat_messages;
 create policy "Public can read approved chat messages"
@@ -263,16 +252,215 @@ exception
 end;
 $$;
 
-revoke all on function public.reserve_event_chat_identity(uuid, uuid, text, text, text) from public;
-grant execute on function public.reserve_event_chat_identity(uuid, uuid, text, text, text) to anon, authenticated;
+revoke all on function public.reserve_event_chat_identity(uuid, uuid, text, text, text) from public, anon, authenticated;
+
+create or replace function public.chat_generated_first_names()
+returns text[]
+language sql
+stable
+set search_path = public
+as $$
+  with
+    core(name) as (
+      values
+        ('Aiko'), ('Mateo'), ('Soren'), ('Amira'), ('Luca'), ('Yara'), ('Kai'), ('Noel'), ('Eva'), ('Nina'), ('Theo'), ('Mila'), ('Omar'), ('Ines'), ('Leo'),
+        ('Aarav'), ('Aaliyah'), ('Abasi'), ('Abena'), ('Adama'), ('Adel'), ('Aditi'), ('Afi'), ('Aisha'), ('Akari'), ('Akira'), ('Alba'), ('Alejandro'),
+        ('Alessia'), ('Alex'), ('Ali'), ('Alma'), ('Amal'), ('Amani'), ('Amara'), ('Ana'), ('Anahi'), ('Ananya'), ('Anders'), ('Anika'), ('Anisa'),
+        ('Anja'), ('Anwar'), ('Aoife'), ('Aria'), ('Ariel'), ('Arjun'), ('Arlo'), ('Asha'), ('Astrid'), ('Aya'), ('Ayana'), ('Ayaan'), ('Ayodele'),
+        ('Aziz'), ('Bao'), ('Bea'), ('Beatriz'), ('Belen'), ('Ben'), ('Binta'), ('Bjorn'), ('Bodhi'), ('Bruno'), ('Cai'), ('Camila'), ('Carlos'),
+        ('Carmen'), ('Celeste'), ('Chandra'), ('Chiara'), ('Chidi'), ('Chika'), ('Chloe'), ('Cian'), ('Clara'), ('Cleo'), ('Cora'), ('Dalia'),
+        ('Damian'), ('Danilo'), ('Dara'), ('Daria'), ('Davi'), ('Dawit'), ('Deepa'), ('Diego'), ('Dina'), ('Diya'), ('Eden'), ('Eka'), ('Elena'),
+        ('Eli'), ('Elian'), ('Elif'), ('Elio'), ('Elise'), ('Emil'), ('Emilia'), ('Emir'), ('Enzo'), ('Eri'), ('Esme'), ('Esther'), ('Evan'),
+        ('Ewan'), ('Farah'), ('Farid'), ('Fatima'), ('Felix'), ('Finn'), ('Fiona'), ('Freya'), ('Gael'), ('Gita'), ('Giorgio'), ('Grace'),
+        ('Hana'), ('Hani'), ('Hanna'), ('Harper'), ('Hassan'), ('Hector'), ('Helena'), ('Hiro'), ('Ibrahim'), ('Idris'), ('Iker'), ('Ilana'),
+        ('Imani'), ('Imran'), ('Ina'), ('Iris'), ('Isa'), ('Isabel'), ('Isla'), ('Ivan'), ('Ivy'), ('Jada'), ('Jae'), ('Jalen'), ('Jamila'),
+        ('Jasper'), ('Jaya'), ('Jean'), ('Jia'), ('Jin'), ('Joao'), ('Jonas'), ('Jules'), ('Jun'), ('Kaito'), ('Kala'), ('Kamau'), ('Kamil'),
+        ('Kara'), ('Karim'), ('Kaya'), ('Keiko'), ('Kenji'), ('Khalil'), ('Kiara'), ('Kira'), ('Kofi'), ('Ksenia'), ('Laila'), ('Lana'),
+        ('Lars'), ('Lea'), ('Leila'), ('Leon'), ('Leona'), ('Lian'), ('Lina'), ('Lior'), ('Livia'), ('Lucia'), ('Luis'), ('Luka'), ('Luna'),
+        ('Mabel'), ('Mae'), ('Maha'), ('Maia'), ('Malik'), ('Malika'), ('Manu'), ('Mara'), ('Marco'), ('Maria'), ('Mariam'), ('Marina'),
+        ('Maya'), ('Mei'), ('Mika'), ('Milan'), ('Mina'), ('Mira'), ('Miro'), ('Musa'), ('Nadia'), ('Nala'), ('Naomi'), ('Nari'), ('Nasir'),
+        ('Nia'), ('Nico'), ('Nika'), ('Nikhil'), ('Noa'), ('Nolan'), ('Nora'), ('Noura'), ('Ola'), ('Oona'), ('Orla'), ('Oscar'), ('Pablo'),
+        ('Paloma'), ('Paolo'), ('Pari'), ('Priya'), ('Rafael'), ('Rafi'), ('Rania'), ('Ravi'), ('Remy'), ('Rina'), ('Rio'), ('Rohan'),
+        ('Rosa'), ('Saanvi'), ('Sacha'), ('Sadia'), ('Sam'), ('Sami'), ('Samira'), ('Sana'), ('Santiago'), ('Sara'), ('Sasha'), ('Selam'),
+        ('Selena'), ('Seo'), ('Seren'), ('Sofia'), ('Talia'), ('Tariq'), ('Tara'), ('Teo'), ('Thandi'), ('Tia'), ('Tobias'), ('Toma'),
+        ('Tomas'), ('Uma'), ('Uri'), ('Valeria'), ('Vera'), ('Viktor'), ('Vina'), ('Viola'), ('Wale'), ('Xavi'), ('Ximena'), ('Yasmin'),
+        ('Yuki'), ('Yuna'), ('Yusuf'), ('Zain'), ('Zara'), ('Zia'), ('Zoe')
+    ),
+    prefix(value) as (
+      select unnest(array['Ada','Ala','Ama','Ana','Ari','Asha','Avi','Aya','Bela','Cai','Cara','Dalia','Dara','Eli','Emi','Eni','Fara','Gio','Hana','Ida','Ila','Ina','Ira','Jae','Jana','Kaya','Kira','Lana','Lea','Lia','Lina','Mara','Mika','Mina','Mira','Nala','Nari','Nia','Nika','Noa','Nora','Ola','Pari','Rafi','Rina','Sami','Sana','Tala','Tari','Uma','Vera','Yara','Zara','Zia'])
+    ),
+    suffix(value) as (
+      select unnest(array['an','ar','el','en','ia','il','in','io','is','ko','la','li','lo','ma','mi','na','ni','no','ra','ri','ro','sa','ta','ti','ya','yo','ara','ari','ela','emi','ena','ika','ina','ira','iya','lan','leo','lia','lin','mar','min','mir','mon','nal','ran','ren','ria','rin','rio','sam','sen','sha','tal','tan','van','yan','zar','zra','dil','fem','har','jun','kai','len','mai','nel','ori','paz','raj','sol','teo','uri','val','wen','xan','yun','zen','ab','ad','af','ag','ah','aj','ak','al','am','as','av','az'])
+    ),
+    generated(name) as (
+      select initcap(prefix.value || middle.value || ending.value)
+      from prefix
+      cross join suffix middle
+      cross join suffix ending
+      where char_length(prefix.value || middle.value || ending.value) between 3 and 13
+      limit 6500
+    )
+  select array_agg(name order by name)
+  from (
+    select name from core
+    union
+    select name from generated
+  ) names
+  where public.normalize_chat_name(name) not in ('admin', 'artist', 'moderator', 'system', 'support');
+$$;
+
+create or replace function public.join_event_chat(
+  p_event_id uuid,
+  p_session_id uuid
+)
+returns public.event_chat_participants
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  event_artist_name text;
+  existing_participant public.event_chat_participants;
+  inserted_participant public.event_chat_participants;
+  names text[];
+  base_name text;
+  candidate_name text;
+  normalized_candidate text;
+  suffix text;
+  avatar text;
+  attempt integer;
+begin
+  if p_event_id is null then
+    raise exception 'chat_event_required';
+  end if;
+
+  if p_session_id is null then
+    raise exception 'chat_session_required';
+  end if;
+
+  select events.artist_name
+  into event_artist_name
+  from public.events
+  where events.id = p_event_id
+    and events.status in ('upcoming', 'live')
+    and events.starts_at is not null
+    and events.ends_at is not null
+    and events.starts_at <= now()
+    and events.ends_at > now();
+
+  if event_artist_name is null then
+    raise exception 'chat_event_not_live';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(p_event_id::text || ':' || p_session_id::text));
+
+  select *
+  into existing_participant
+  from public.event_chat_participants
+  where event_id = p_event_id
+    and session_id = p_session_id
+  limit 1;
+
+  if existing_participant.id is not null then
+    update public.event_chat_participants
+    set last_seen_at = now()
+    where id = existing_participant.id
+    returning * into existing_participant;
+
+    return existing_participant;
+  end if;
+
+  names := public.chat_generated_first_names();
+  base_name := names[1 + floor(random() * array_length(names, 1))::int];
+  avatar := 'retro-' || (1 + floor(random() * 8)::int)::text;
+
+  for attempt in 0..8 loop
+    if attempt = 0 then
+      candidate_name := left(base_name, 16);
+    else
+      suffix := (10 + floor(random() * 990)::int)::text;
+      candidate_name := left(base_name, greatest(1, 16 - char_length(suffix))) || suffix;
+    end if;
+
+    normalized_candidate := public.normalize_chat_name(candidate_name);
+
+    if normalized_candidate in ('admin', 'artist', 'moderator', 'system', 'support') then
+      continue;
+    end if;
+
+    if normalized_candidate = public.normalize_chat_name(event_artist_name) then
+      continue;
+    end if;
+
+    begin
+      insert into public.event_chat_participants (
+        event_id,
+        session_id,
+        display_name,
+        normalized_name,
+        avatar_id,
+        last_seen_at
+      )
+      values (
+        p_event_id,
+        p_session_id,
+        candidate_name,
+        normalized_candidate,
+        avatar,
+        now()
+      )
+      returning * into inserted_participant;
+
+      return inserted_participant;
+    exception
+      when unique_violation then
+        select *
+        into existing_participant
+        from public.event_chat_participants
+        where event_id = p_event_id
+          and session_id = p_session_id
+        limit 1;
+
+        if existing_participant.id is not null then
+          return existing_participant;
+        end if;
+    end;
+  end loop;
+
+  candidate_name := 'Aiko' || (1000 + floor(random() * 9000)::int)::text;
+  normalized_candidate := public.normalize_chat_name(candidate_name);
+
+  insert into public.event_chat_participants (
+    event_id,
+    session_id,
+    display_name,
+    normalized_name,
+    avatar_id,
+    last_seen_at
+  )
+  values (
+    p_event_id,
+    p_session_id,
+    candidate_name,
+    normalized_candidate,
+    avatar,
+    now()
+  )
+  returning * into inserted_participant;
+
+  return inserted_participant;
+end;
+$$;
+
+revoke all on function public.join_event_chat(uuid, uuid) from public;
+grant execute on function public.join_event_chat(uuid, uuid) to anon, authenticated;
 
 drop function if exists public.submit_chat_message(uuid, text, text, uuid);
+drop function if exists public.submit_chat_message(uuid, uuid, text, text, text, uuid);
 
 create or replace function public.submit_chat_message(
   p_event_id uuid,
   p_participant_id uuid,
-  p_display_name text,
-  p_avatar_id text,
   p_body text,
   p_client_token uuid
 )
@@ -321,9 +509,7 @@ begin
   into participant
   from public.event_chat_participants
   where id = p_participant_id
-    and event_id = p_event_id
-    and display_name = btrim(regexp_replace(coalesce(p_display_name, ''), '[[:space:]]+', ' ', 'g'))
-    and avatar_id = p_avatar_id;
+    and event_id = p_event_id;
 
   if participant.id is null then
     raise exception 'A reserved chat identity is required.';
@@ -367,8 +553,8 @@ begin
 end;
 $$;
 
-revoke all on function public.submit_chat_message(uuid, uuid, text, text, text, uuid) from public;
-grant execute on function public.submit_chat_message(uuid, uuid, text, text, text, uuid) to anon, authenticated;
+revoke all on function public.submit_chat_message(uuid, uuid, text, uuid) from public;
+grant execute on function public.submit_chat_message(uuid, uuid, text, uuid) to anon, authenticated;
 
 create or replace function public.set_chat_message_pin(
   p_message_id uuid,

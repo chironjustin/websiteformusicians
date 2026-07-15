@@ -26,13 +26,12 @@ export interface ChatParticipant {
   normalized_name: string;
   avatar_id: string;
   created_at: string;
+  last_seen_at: string;
 }
 
 export interface CreateVisitorChatMessageInput {
   event_id: string;
   participant_id: string;
-  display_name: string;
-  avatar_id: string;
   body: string;
   client_token?: string;
 }
