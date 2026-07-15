@@ -91,6 +91,8 @@ as $$
   where public.normalize_chat_name(name) not in ('admin', 'artist', 'moderator', 'system', 'support');
 $$;
 
+drop function if exists public.join_event_chat(uuid, uuid);
+
 create or replace function public.join_event_chat(
   p_event_id uuid,
   p_session_id uuid

@@ -10,6 +10,8 @@ drop constraint if exists event_chat_participants_avatar_id_check;
 alter table public.chat_messages
 drop constraint if exists chat_messages_avatar_id_check;
 
+drop function if exists public.join_event_chat(uuid, uuid);
+
 create or replace function public.join_event_chat(
   p_event_id uuid,
   p_session_id uuid
