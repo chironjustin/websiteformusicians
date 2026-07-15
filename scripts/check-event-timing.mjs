@@ -103,6 +103,7 @@ assert(publicPage.includes("function ActiveChatComposer") && publicPage.includes
 assert(publicPage.includes("function LiveMessageStream"), "Approved messages must render independently from the join state.");
 assert(publicPage.includes('className="live-chat__messages"') && publicPage.includes("overflow-y: auto") && publicPage.includes("bottomAnchorRef"), "Joined chat messages must render in a dedicated scroll viewport with a bottom anchor.");
 assert(publicPage.includes('className={`live-chat-layout ${joined ? "live-chat-layout--joined"') && publicPage.includes('className="chat-composer"'), "Joined chat composer must be outside the message viewport in the live chat layout.");
+assert(publicPage.includes("@media (max-width: 640px)") && publicPage.includes("flex: 1 1 0") && publicPage.includes("height: 0") && publicPage.includes("-webkit-overflow-scrolling: touch"), "Mobile joined chat viewport must have Safari-safe flex and scrolling constraints.");
 assert(!publicPage.includes("joined || message.is_admin"), "Pre-join approved messages must not use alternate hidden message markup.");
 assert(!publicPage.includes("ChatAvatar") && !publicPage.includes("ArtistMessageAvatar") && !publicPage.includes("createRetroAvatar"), "Public chat messages and composer must not render generated identity avatars.");
 assert(!publicPage.includes("avatarId") && !publicPage.includes("CHAT_AVATAR_KEY_PREFIX"), "Stored generated chat identities must not include avatar metadata.");

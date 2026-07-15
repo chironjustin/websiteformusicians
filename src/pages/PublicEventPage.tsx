@@ -220,7 +220,31 @@ function GlobalStyles() {
     }
     @media (max-width: 640px) {
       .live-event-view {
+        height: 100vh;
         padding: 2rem 1.35rem 0;
+      }
+      .live-event-content,
+      .live-chat-layout,
+      .live-chat-layout--joined,
+      .live-chat-stream--joined {
+        min-height: 0;
+        overflow: hidden;
+      }
+      .live-chat-layout,
+      .live-chat-layout--joined,
+      .live-chat-stream--joined {
+        flex: 1 1 0;
+      }
+      .live-chat__header,
+      .chat-composer {
+        flex: 0 0 auto;
+      }
+      .live-chat__messages {
+        flex: 1 1 0;
+        height: 0;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
       }
       .chat-composer {
         padding-bottom: calc(max(1rem, env(safe-area-inset-bottom)) + 0.75rem);
@@ -233,6 +257,13 @@ function GlobalStyles() {
       }
       .chat-composer__feedback {
         min-height: 1.35rem;
+      }
+    }
+    @supports (height: 100dvh) {
+      @media (max-width: 640px) {
+        .live-event-view {
+          height: 100dvh;
+        }
       }
     }
   `;
