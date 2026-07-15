@@ -1,8 +1,6 @@
 -- Durable low-risk chat queue and fixed-rate automatic publication.
 -- Run after chat-risk-classification.sql and event-status-cron.sql.
 
-create extension if not exists pg_cron with schema extensions;
-
 alter table public.events
 add column if not exists auto_publish_enabled boolean not null default false,
 add column if not exists queue_paused boolean not null default false,
@@ -697,14 +695,54 @@ $$;
 revoke all on function public.process_chat_auto_publish_queue(uuid) from public;
 grant execute on function public.process_chat_auto_publish_queue(uuid) to authenticated;
 
-select cron.unschedule(jobid)
-from cron.job
-where jobname = 'process-chat-auto-publish-queue';
+drop function if exists public.run_chat_auto_publish_queue_for_minute();
+
+create or replace function public.process_chat_publish_queue(p_event_id uuid default null)
+returns jsonb
+language sql
+security definer
+set search_path = public
+as $$
+  select public.process_chat_auto_publish_queue(p_event_id);
+$$;
+
+revoke all on function public.process_chat_publish_queue(uuid) from public;
+grant execute on function public.process_chat_publish_queue(uuid) to authenticated;
+
+create extension if not exists pg_cron with schema extensions;
+
+do $$
+declare
+  obsolete_job record;
+begin
+  for obsolete_job in
+    select jobid, jobname, schedule, command, active
+    from cron.job
+    where jobname in (
+      'process-chat-publish-queue',
+      'process-chat-publish-queue-2',
+      'process-chat-publish-queue-3',
+      'process-chat-publish-queue-4',
+      'process-chat-publish-queue-5',
+      'process-chat-auto-publish-queue'
+    )
+  loop
+    perform cron.unschedule(obsolete_job.jobid);
+    raise notice 'Unscheduled obsolete chat queue job % (%)', obsolete_job.jobname, obsolete_job.jobid;
+  end loop;
+end;
+$$;
 
 select cron.schedule(
-  'process-chat-auto-publish-queue',
+  'process-chat-publish-queue',
   '3 seconds',
-  $$select public.process_chat_auto_publish_queue();$$
+  $$select public.process_chat_publish_queue();$$
 );
+
+-- Verification after applying this migration:
+-- select jobid, jobname, schedule, command, active
+-- from cron.job
+-- where jobname like '%chat%publish%queue%';
+-- Expected: exactly one active row named process-chat-publish-queue with schedule 3 seconds.
 
 notify pgrst, 'reload schema';
