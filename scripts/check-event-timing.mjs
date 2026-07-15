@@ -275,6 +275,9 @@ assert(!readinessMigration.includes("Add an event title before starting the even
 const riskMigration = readFileSync("supabase/chat-risk-classification.sql", "utf8");
 assert(riskMigration.includes("add column if not exists risk_level") && riskMigration.includes("add column if not exists auto_publish_eligible"), "Risk classification migration must add risk metadata fields.");
 assert(riskMigration.includes("create or replace function public.classify_chat_message") && riskMigration.includes("CONTAINS_LINK") && riskMigration.includes("SCRIPT_PAYLOAD") && riskMigration.includes("RECENT_DUPLICATE"), "Risk classification migration must install deterministic rule flags.");
+assert(riskMigration.includes("PROFANITY") && riskMigration.includes("PERSONAL_ATTACK") && riskMigration.includes("HARASSMENT") && riskMigration.includes("THREAT") && riskMigration.includes("HATE_SPEECH"), "Risk classification migration must include targeted abuse and harassment flags.");
+assert(riskMigration.includes("match_mode in ('exact', 'substring', 'word')") && riskMigration.includes("term_record.match_mode = 'word'"), "Risk terms must support whole-word profanity matching.");
+assert(!riskMigration.includes("[[:alpha:]]+ is terrible") && !riskMigration.includes("[[:alpha:]]+ is trash"), "Targeted harassment rules must not classify generic content criticism as person-directed abuse.");
 assert(riskMigration.includes("risk_level = 'medium'") && riskMigration.includes("CLASSIFIER_FAILURE") && riskMigration.includes("auto_publish_eligible = false"), "Classifier failures must remain private and ineligible.");
 assert(!riskMigration.includes("status = case when classification->>'riskLevel' = 'low' then 'approved'") && !riskMigration.includes("published_at = clock_timestamp()"), "Step 4 must not automatically approve or publish classified messages.");
 
