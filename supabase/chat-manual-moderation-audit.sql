@@ -3,6 +3,7 @@
 alter table public.chat_messages
 add column if not exists approved_at timestamptz,
 add column if not exists approved_by uuid references auth.users(id) on delete set null,
+add column if not exists published_at timestamptz,
 add column if not exists rejected_at timestamptz,
 add column if not exists rejected_by uuid references auth.users(id) on delete set null,
 add column if not exists rejection_reason text,
@@ -55,6 +56,7 @@ declare
   target_event public.events;
   audit_action text;
   cleaned_reason text;
+  v_now timestamptz := clock_timestamp();
 begin
   if auth.uid() is null then
     raise exception 'NOT_EVENT_ADMIN';
@@ -102,10 +104,11 @@ begin
   update public.chat_messages
   set
     status = p_next_status,
-    approved_at = case when p_next_status = 'approved' then now() else approved_at end,
+    approved_at = case when p_next_status = 'approved' then v_now else approved_at end,
+    published_at = case when p_next_status = 'approved' then v_now else null end,
     approved_by = case when p_next_status = 'approved' then auth.uid() else approved_by end,
     approval_source = case when p_next_status = 'approved' then 'manual' else approval_source end,
-    rejected_at = case when p_next_status = 'rejected' then now() else rejected_at end,
+    rejected_at = case when p_next_status = 'rejected' then v_now else rejected_at end,
     rejected_by = case when p_next_status = 'rejected' then auth.uid() else rejected_by end,
     rejection_reason = case when p_next_status = 'rejected' then cleaned_reason else rejection_reason end
   where id = target_message.id

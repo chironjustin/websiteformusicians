@@ -30,6 +30,7 @@ create table if not exists public.chat_messages (
   is_liked boolean not null default false,
   approved_at timestamptz,
   approved_by uuid references auth.users(id) on delete set null,
+  published_at timestamptz,
   rejected_at timestamptz,
   rejected_by uuid references auth.users(id) on delete set null,
   rejection_reason text,
@@ -40,13 +41,19 @@ create table if not exists public.chat_messages (
   updated_at timestamptz not null default now(),
   constraint chat_messages_status_check check (status in ('pending', 'approved', 'rejected')),
   constraint chat_messages_display_name_length check (char_length(display_name) between 1 and 50),
-  constraint chat_messages_body_length check (char_length(btrim(body)) between 1 and 400)
+  constraint chat_messages_body_length check (char_length(btrim(body)) between 1 and 400),
+  constraint chat_messages_published_at_status_check check (
+    (status = 'approved' and published_at is not null)
+    or
+    (status <> 'approved' and published_at is null)
+  )
 );
 
 create unique index if not exists event_chat_participants_event_normalized_name_idx on public.event_chat_participants(event_id, normalized_name);
 create unique index if not exists event_chat_participants_event_session_idx on public.event_chat_participants(event_id, session_id) where session_id is not null;
 create index if not exists event_chat_participants_event_created_idx on public.event_chat_participants(event_id, created_at);
 create index if not exists chat_messages_event_status_created_idx on public.chat_messages(event_id, status, created_at);
+create index if not exists chat_messages_event_published_idx on public.chat_messages(event_id, status, published_at, id) where status = 'approved';
 create index if not exists chat_messages_event_pinned_created_idx on public.chat_messages(event_id, is_pinned desc, created_at);
 create index if not exists chat_messages_event_client_token_idx on public.chat_messages(event_id, client_token) where client_token is not null;
 create index if not exists chat_messages_event_participant_idx on public.chat_messages(event_id, participant_id) where participant_id is not null;
@@ -115,6 +122,39 @@ create unique index if not exists chat_messages_one_highlighted_per_event_idx
 on public.chat_messages(event_id)
 where event_id is not null
   and is_highlighted = true;
+
+create or replace function public.set_chat_message_publication_fields()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_now timestamptz := clock_timestamp();
+begin
+  if new.status = 'approved' then
+    if new.published_at is null then
+      new.published_at := v_now;
+    end if;
+    if new.approved_at is null then
+      new.approved_at := new.published_at;
+    end if;
+    if new.approval_source is null then
+      new.approval_source := case when new.is_admin then 'admin_direct' else 'manual' end;
+    end if;
+  else
+    new.published_at := null;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists set_chat_message_publication_fields on public.chat_messages;
+create trigger set_chat_message_publication_fields
+before insert or update of status, published_at, approved_at, approval_source, is_admin
+on public.chat_messages
+for each row
+execute function public.set_chat_message_publication_fields();
 
 drop trigger if exists set_chat_messages_updated_at on public.chat_messages;
 create trigger set_chat_messages_updated_at
@@ -202,7 +242,13 @@ as $$
       where events.id = chat_messages.event_id
         and events.status in ('live', 'finished')
     )
-  order by chat_messages.is_pinned desc, chat_messages.created_at asc;
+  order by
+    chat_messages.is_pinned desc,
+    case
+      when chat_messages.participant_id = p_participant_id then chat_messages.created_at
+      else chat_messages.published_at
+    end asc nulls last,
+    chat_messages.id asc;
 $$;
 
 revoke all on function public.get_visitor_visible_chat_messages(uuid, uuid, uuid) from public;
@@ -776,6 +822,7 @@ declare
   target_event public.events;
   audit_action text;
   cleaned_reason text;
+  v_now timestamptz := clock_timestamp();
 begin
   if auth.uid() is null then
     raise exception 'NOT_EVENT_ADMIN';
@@ -823,10 +870,11 @@ begin
   update public.chat_messages
   set
     status = p_next_status,
-    approved_at = case when p_next_status = 'approved' then now() else approved_at end,
+    approved_at = case when p_next_status = 'approved' then v_now else approved_at end,
+    published_at = case when p_next_status = 'approved' then v_now else null end,
     approved_by = case when p_next_status = 'approved' then auth.uid() else approved_by end,
     approval_source = case when p_next_status = 'approved' then 'manual' else approval_source end,
-    rejected_at = case when p_next_status = 'rejected' then now() else rejected_at end,
+    rejected_at = case when p_next_status = 'rejected' then v_now else rejected_at end,
     rejected_by = case when p_next_status = 'rejected' then auth.uid() else rejected_by end,
     rejection_reason = case when p_next_status = 'rejected' then cleaned_reason else rejection_reason end
   where id = target_message.id

@@ -15,6 +15,7 @@ export interface ChatMessage {
   is_liked: boolean;
   approved_at?: string | null;
   approved_by?: string | null;
+  published_at?: string | null;
   rejected_at?: string | null;
   rejected_by?: string | null;
   rejection_reason?: string | null;

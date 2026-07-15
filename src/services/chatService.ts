@@ -51,12 +51,20 @@ export function getOrCreateChatSessionId() {
   return next;
 }
 
-function orderedMessagesQuery() {
+function adminMessagesQuery() {
   return supabase
     .from("chat_messages")
     .select("*")
     .order("is_pinned", { ascending: false })
     .order("created_at", { ascending: true });
+}
+
+function approvedPublicMessagesQuery() {
+  return supabase
+    .from("chat_messages")
+    .select("*")
+    .order("published_at", { ascending: true, nullsFirst: false })
+    .order("id", { ascending: true });
 }
 
 export async function getPublicChatMessages(eventId: string, viewer?: { participantId: string; sessionId: string } | null) {
@@ -71,7 +79,7 @@ export async function getPublicChatMessages(eventId: string, viewer?: { particip
     return (data ?? []) as ChatMessage[];
   }
 
-  const { data, error } = await orderedMessagesQuery()
+  const { data, error } = await approvedPublicMessagesQuery()
     .eq("event_id", eventId)
     .eq("status", "approved")
     .returns<ChatMessage[]>();
@@ -81,7 +89,7 @@ export async function getPublicChatMessages(eventId: string, viewer?: { particip
 }
 
 export async function getAdminChatMessages(eventId: string) {
-  const { data, error } = await orderedMessagesQuery()
+  const { data, error } = await adminMessagesQuery()
     .eq("event_id", eventId)
     .returns<ChatMessage[]>();
 
@@ -170,6 +178,7 @@ export async function sendAdminMessage(input: CreateAdminChatMessageInput) {
       display_name: displayName,
       body,
       status: "approved",
+      approval_source: "admin_direct",
       is_admin: true,
       is_pinned: false,
       is_highlighted: false,

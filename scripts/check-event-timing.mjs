@@ -121,6 +121,7 @@ assert(chatHook.includes("filter: `event_id=eq.${eventId}`"), "Realtime chat sub
 
 const chatService = readFileSync("src/services/chatService.ts", "utf8");
 assert(chatService.includes('.eq("event_id", eventId)') && chatService.includes('.eq("status", "approved")'), "Public chat query must fetch approved messages for the active event only.");
+assert(chatService.includes('.order("published_at", { ascending: true') && chatService.includes('.order("id", { ascending: true') && chatService.includes('.order("created_at", { ascending: true'), "Public chat must order approved messages by publication time while admin/moderation keeps submission-time ordering.");
 assert(chatService.includes('supabase.rpc("submit_chat_message"') && chatService.includes("p_client_token") && chatService.includes("get_visitor_visible_chat_messages"), "Visitor submissions must use the scoped public RPC and joined visitors must load approved plus sender-private messages.");
 assert(chatService.includes('supabase.rpc("moderate_chat_message"') && chatService.includes("p_next_status"), "Admin moderation must use the audited moderation RPC.");
 assert(chatService.includes("ChatSubmissionError") && chatService.includes("retryAfterSeconds") && chatService.includes("result.code") && chatService.includes("result.message"), "Visitor submission service must map structured server errors, including rate-limit metadata.");
@@ -142,6 +143,9 @@ assert(chatSchema.includes("chat_messages_event_participant_client_token_idx"), 
 assert(chatSchema.includes("create or replace function public.submit_chat_message"), "Chat schema must provide a public pending-message submit RPC.");
 assert(chatSchema.includes("create or replace function public.get_visitor_visible_chat_messages") && chatSchema.includes("participant_id = p_participant_id"), "Chat schema must provide sender-private public message visibility.");
 assert(chatSchema.includes("create table if not exists public.chat_message_moderation_audit") && chatSchema.includes("create or replace function public.moderate_chat_message"), "Chat schema must provide audited manual moderation.");
+assert(chatSchema.includes("published_at timestamptz") && chatSchema.includes("chat_messages_published_at_status_check") && chatSchema.includes("set_chat_message_publication_fields"), "Chat schema must separate submission created_at from public published_at.");
+assert(chatSchema.includes("when chat_messages.participant_id = p_participant_id then chat_messages.created_at") && chatSchema.includes("else chat_messages.published_at"), "Sender-visible chat ordering must keep own messages in created_at position and order other approved messages by published_at.");
+assert(chatSchema.includes("published_at = case when p_next_status = 'approved' then v_now else null end") && chatSchema.includes("approved_at = case when p_next_status = 'approved' then v_now"), "Manual approval must assign approved_at and published_at from the same trusted database timestamp.");
 assert(chatSchema.includes("create table if not exists public.event_chat_participants") && chatSchema.includes("event_chat_participants_event_normalized_name_idx"), "Chat schema must enforce event-scoped temporary username uniqueness.");
 assert(chatSchema.includes("session_id uuid") && chatSchema.includes("event_chat_participants_event_session_idx"), "Chat schema must preserve generated chat identity by event and session.");
 assert(chatSchema.includes("create or replace function public.join_event_chat"), "Chat schema must generate anonymous event identities server-side.");
