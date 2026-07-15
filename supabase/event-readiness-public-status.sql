@@ -31,11 +31,6 @@ begin
     field_errors := field_errors || jsonb_build_object('artistName', 'Add an artist name before starting the event.');
   end if;
 
-  if nullif(btrim(coalesce(new.title, '')), '') is null then
-    missing_fields := array_append(missing_fields, 'title');
-    field_errors := field_errors || jsonb_build_object('title', 'Add an event title before starting the event.');
-  end if;
-
   if new.starts_at is null then
     missing_fields := array_append(missing_fields, 'startsAt');
     field_errors := field_errors || jsonb_build_object('startsAt', 'Add the event start date and time.');
@@ -77,7 +72,7 @@ $$;
 
 drop trigger if exists validate_event_public_readiness on public.events;
 create trigger validate_event_public_readiness
-before insert or update of status, title, artist_name, starts_at, ends_at, audio_path, artist_image_path, merch_image_path, merch_url
+before insert or update of status, artist_name, starts_at, ends_at, audio_path, artist_image_path, merch_image_path, merch_url
 on public.events
 for each row
 execute function public.validate_event_public_readiness();
@@ -94,7 +89,6 @@ begin
       nullif(btrim(coalesce(audio_path, '')), '') is null
       or nullif(btrim(coalesce(artist_image_path, '')), '') is null
       or nullif(btrim(coalesce(artist_name, '')), '') is null
-      or nullif(btrim(coalesce(title, '')), '') is null
       or starts_at is null
       or ends_at is null
       or ends_at <= starts_at

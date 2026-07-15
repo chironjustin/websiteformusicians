@@ -4,7 +4,6 @@ export type EventReadinessField =
   | "song"
   | "artistImage"
   | "artistName"
-  | "title"
   | "startsAt"
   | "endsAt"
   | "merchUrl"
@@ -17,7 +16,6 @@ export type EventReadinessInput = Partial<Pick<
   | "audio_path"
   | "artist_image_path"
   | "artist_name"
-  | "title"
   | "starts_at"
   | "ends_at"
   | "merch_image_path"
@@ -65,10 +63,6 @@ export function validateEventReadiness(event: EventReadinessInput) {
 
   if (!hasText(event.artist_name)) {
     errors.artistName = "Add an artist name before starting the event.";
-  }
-
-  if (!hasText(event.title)) {
-    errors.title = "Add an event title before starting the event.";
   }
 
   const startsAt = event.starts_at ? new Date(event.starts_at).getTime() : NaN;

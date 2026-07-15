@@ -184,7 +184,6 @@ export default function AdminPage() {
   const setField = (key: keyof FormState, value: string) => {
     setFieldErrors(current => {
       const next = { ...current };
-      if (key === "title") delete next.title;
       if (key === "artist_name") delete next.artistName;
       if (key === "starts_at") delete next.startsAt;
       if (key === "ends_at") delete next.endsAt;
@@ -293,7 +292,6 @@ export default function AdminPage() {
 
   function getStartReadinessCandidate(): EventReadinessInput {
     return {
-      title: form.title,
       artist_name: form.artist_name,
       starts_at: dateTimeLocalToUtc(form.starts_at),
       ends_at: dateTimeLocalToUtc(form.ends_at),
@@ -537,7 +535,7 @@ export default function AdminPage() {
 
           <Panel title="Song Info">
             <Grid>
-              <Field label="Event Title" requiredNote="Required to start the event." error={fieldErrors.title} value={form.title} onChange={value => setField("title", value)} />
+              <Field label="Event Title" value={form.title} onChange={value => setField("title", value)} />
               <Field label="Artist Name" requiredNote="Required to start the event." error={fieldErrors.artistName} value={form.artist_name} onChange={value => setField("artist_name", value)} />
               <Field label="Event Start Date and Time" requiredNote="Required to start the event." error={fieldErrors.startsAt} type="datetime-local" value={form.starts_at} onChange={value => setField("starts_at", value)} />
               <Field label="Event End Date and Time" requiredNote="Required to start the event." error={fieldErrors.endsAt} type="datetime-local" value={form.ends_at} onChange={value => setField("ends_at", value)} />

@@ -233,6 +233,7 @@ assert(!eventService.includes("scheduleEvent"), "Separate Schedule Event workflo
 assert(!eventService.includes("calculateEndsAt"), "Event service must not recalculate ends_at from duration.");
 assert(eventService.includes("assertEventReadyToStart") && eventService.includes('input.status === "upcoming" || input.status === "live"'), "Event service must validate readiness before public status updates.");
 assert(eventService.includes('.not("artist_image_path", "is", null)') && eventService.includes('.not("artist_name", "is", null)'), "Public event selection must defensively require complete artist metadata.");
+assert(!eventService.includes('.not("title", "is", null)'), "Event title must not be required for public event selection.");
 
 const deleteArchivedEventFunction = readFileSync("supabase/functions/delete-archived-event/index.ts", "utf8");
 assert(deleteArchivedEventFunction.includes("function normalizeStoragePath") && deleteArchivedEventFunction.includes("new URL(trimmed)"), "Archived event deletion must normalize raw paths and Storage URLs before cleanup.");
@@ -252,6 +253,7 @@ assert(adminPage.includes("verifyStorageObjectExists") && adminPage.includes("Up
 assert(adminPage.includes("validateEventReadiness") && adminPage.includes("Required to start the event."), "Admin Start Event must show field-level readiness validation.");
 assert(adminPage.includes("fieldErrors.merchImage") && adminPage.includes("fieldErrors.merchUrl"), "Admin must render merch image/link field errors before starting.");
 assert(!adminPage.includes("Upload artwork or an artist image before starting"), "Artist image must be required directly; artwork must not satisfy the artist image requirement.");
+assert(!adminPage.includes('label="Event Title" requiredNote='), "Admin Event Title field must not be marked required to start.");
 assert(adminPage.includes("const savedDraft = await updateEvent(baseEvent.id, updates)") && adminPage.includes("const started = await startEvent(savedDraft.id)"), "Start Event must save media paths before publishing the event.");
 assert(adminPage.includes("clearConfirmedPendingFiles(uploadedKeys)") && !adminPage.includes("nextFiles.audio = null"), "Pending files must only clear after Supabase returns the confirmed saved row.");
 assert(adminPage.includes("MEDIA_PATH_FIELDS.filter(field => latest[field])"), "Admin diagnostics must log which media keys are included in update payloads.");
@@ -264,6 +266,7 @@ const readinessMigration = readFileSync("supabase/event-readiness-public-status.
 assert(readinessMigration.includes("validate_event_public_readiness") && readinessMigration.includes("new.status not in ('upcoming', 'live', 'finished')"), "Database must reject incomplete public event statuses.");
 assert(readinessMigration.includes("artist_image_path") && readinessMigration.includes("EVENT_NOT_READY"), "Database readiness guard must require artist image and return a stable readiness error.");
 assert(readinessMigration.includes("Add a merch link or remove the merch image") && readinessMigration.includes("Add a merch image or remove the merch link") && readinessMigration.includes("^https://"), "Database readiness guard must enforce merch image/link pairing and HTTPS merch links.");
+assert(!readinessMigration.includes("Add an event title before starting the event") && !readinessMigration.includes("missing_fields := array_append(missing_fields, 'title')"), "Database readiness guard must not require event title.");
 
 const cronSql = readFileSync("supabase/event-status-cron.sql", "utf8");
 assert(cronSql.includes("status = 'upcoming'") && cronSql.includes("starts_at <= now()"), "Cron must promote due upcoming events to live.");
