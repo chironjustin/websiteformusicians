@@ -3,8 +3,6 @@ import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemaining
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
 import {
-  USER_AVATAR_IDS,
-  isUserAvatarId,
   joinEventChatIdentity,
   sendVisitorMessage,
   getVisitorMessageStatus,
@@ -59,7 +57,6 @@ type AudioUrlPipelineDiagnostics = {
 };
 
 const CHAT_NAME_KEY_PREFIX = "music-event-chat-name:";
-const CHAT_AVATAR_KEY_PREFIX = "music-event-chat-avatar:";
 const CHAT_PARTICIPANT_KEY_PREFIX = "music-event-chat-participant:";
 const LEGACY_CHAT_IDENTITY_KEYS = ["live-chat-name", "chat-name", "username", "joined-chat"];
 
@@ -67,7 +64,6 @@ type JoinedChatIdentity = {
   participantId: string;
   sessionId: string;
   displayName: string;
-  avatarId: string;
 };
 
 function pad2(value: number) {
@@ -101,37 +97,6 @@ function getErrorLogInfo(error: unknown) {
 
 function logAudioUrlPipeline(message: string, details: Record<string, unknown>) {
   console.info(`[audio-url-pipeline] ${message}`, details);
-}
-
-function createRetroAvatar(avatarId: string) {
-  const index = Math.max(0, USER_AVATAR_IDS.indexOf(avatarId as typeof USER_AVATAR_IDS[number]));
-  const palette = [
-    ["#53B6A6", "#4651B8"],
-    ["#8BD450", "#313E9B"],
-    ["#F0A04B", "#4B2FA3"],
-    ["#D35F8D", "#225E78"],
-    ["#58A6FF", "#7A3FA3"],
-    ["#D6D65C", "#2F6B4F"],
-    ["#A171FF", "#1F7F6D"],
-    ["#74C69D", "#5C3B9E"],
-  ][index] ?? ["#53B6A6", "#4651B8"];
-  const [skin, accent] = palette;
-  const face = index % 2 === 0 ? "round" : "square";
-  const visor = index === 2 || index === 5;
-  const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" shape-rendering="crispEdges">
-  <rect width="48" height="48" fill="#050505"/>
-  <rect x="4" y="6" width="40" height="38" fill="${accent}" opacity="0.18"/>
-  <rect x="10" y="8" width="28" height="30" rx="${face === "round" ? 10 : 2}" fill="${skin}"/>
-  <rect x="14" y="14" width="6" height="6" fill="#020202"/>
-  <rect x="28" y="14" width="6" height="6" fill="#020202"/>
-  ${visor ? '<rect x="12" y="12" width="24" height="8" fill="#d7ffe1" opacity="0.45"/>' : ""}
-  <rect x="18" y="27" width="12" height="3" fill="#020202"/>
-  <rect x="8" y="36" width="32" height="8" fill="${accent}"/>
-  <rect x="2" y="2" width="6" height="6" fill="#00FF41" opacity="0.75"/>
-  <rect x="40" y="40" width="6" height="6" fill="#00FF41" opacity="0.75"/>
-</svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 function GlobalStyles() {
@@ -728,12 +693,11 @@ function readStoredChatIdentity(eventId: string): JoinedChatIdentity | null {
   if (participantValue) {
     try {
       const parsed = JSON.parse(participantValue) as Partial<JoinedChatIdentity>;
-      if (parsed.participantId && parsed.sessionId && parsed.displayName && isUserAvatarId(parsed.avatarId)) {
+      if (parsed.participantId && parsed.sessionId && parsed.displayName) {
         return {
           participantId: parsed.participantId,
           sessionId: parsed.sessionId,
           displayName: parsed.displayName,
-          avatarId: parsed.avatarId,
         };
       }
     } catch {
@@ -747,13 +711,11 @@ function readStoredChatIdentity(eventId: string): JoinedChatIdentity | null {
 function storeChatIdentity(eventId: string, identity: JoinedChatIdentity) {
   window.localStorage.setItem(getEventChatParticipantKey(eventId), JSON.stringify(identity));
   window.localStorage.setItem(getEventChatNameKey(eventId), identity.displayName);
-  window.localStorage.setItem(`${CHAT_AVATAR_KEY_PREFIX}${eventId}`, identity.avatarId);
 }
 
 function removeEventChatIdentity(eventId: string) {
   window.localStorage.removeItem(getEventChatParticipantKey(eventId));
   window.localStorage.removeItem(getEventChatNameKey(eventId));
-  window.localStorage.removeItem(`${CHAT_AVATAR_KEY_PREFIX}${eventId}`);
 }
 
 function removeLegacyChatIdentity() {
@@ -1610,7 +1572,7 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl }:
     }}>
       {pinnedMessage && (
         <div style={{ width: "min(100%, 620px)" }}>
-          <ChatMessageBubble message={pinnedMessage} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} pinnedArea />
+          <ChatMessageBubble message={pinnedMessage} joined={joined} artistName={artistName} artistUrl={artistUrl} pinnedArea />
         </div>
       )}
       {joined && (
@@ -1620,29 +1582,23 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl }:
         </div>
       )}
       {feedMessages.map(message => (
-        <ChatMessageBubble key={message.id} message={message} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} />
+        <ChatMessageBubble key={message.id} message={message} joined={joined} artistName={artistName} artistUrl={artistUrl} />
       ))}
     </section>
   );
 }
 
-function ChatMessageBubble({ message, joined, eventId, artistName, artistUrl, pinnedArea = false }: { message: ChatMessage; joined: boolean; eventId: string; artistName: string; artistUrl: string; pinnedArea?: boolean }) {
+function ChatMessageBubble({ message, joined, artistName, artistUrl, pinnedArea = false }: { message: ChatMessage; joined: boolean; artistName: string; artistUrl: string; pinnedArea?: boolean }) {
   const displayName = message.is_admin ? artistName : message.display_name;
   const labels = getPublicMessageLabels(message);
 
   return (
     <div style={{
       maxWidth: pinnedArea ? "100%" : joined ? "min(88%, 620px)" : "88%",
-      display: "flex",
-      alignItems: "flex-start",
-      gap: "0.55rem",
       borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
       padding: joined ? "0.45rem 0 0.45rem 0.65rem" : "0.25rem 0 0.25rem 0.65rem",
       background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
     }}>
-      {message.is_admin
-        ? <ArtistMessageAvatar artistUrl={artistUrl} />
-        : <ChatAvatar avatarId={message.avatar_id} />}
       <div style={{ minWidth: 0 }}>
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em", overflowWrap: "anywhere" }}>
           {displayName}{labels.length > 0 ? ` ${labels.join(" ")}` : ""}
@@ -1681,47 +1637,6 @@ function ArtistLikeIndicator({ artistUrl }: { artistUrl: string }) {
   );
 }
 
-function ChatAvatar({ avatarId }: { avatarId: string | null | undefined }) {
-  const safeAvatarId = isUserAvatarId(avatarId) ? avatarId : USER_AVATAR_IDS[0];
-
-  return (
-    <img
-      src={createRetroAvatar(safeAvatarId)}
-      alt=""
-      aria-hidden="true"
-      style={{
-        width: 28,
-        height: 28,
-        objectFit: "cover",
-        imageRendering: "pixelated",
-        flexShrink: 0,
-        opacity: 0.9,
-      }}
-    />
-  );
-}
-
-function ArtistMessageAvatar({ artistUrl }: { artistUrl: string }) {
-  const src = artistUrl.trim() || PLACEHOLDER_SRC;
-
-  return (
-    <img
-      src={src}
-      alt=""
-      aria-hidden="true"
-      style={{
-        width: 28,
-        aspectRatio: "4 / 5",
-        objectFit: "cover",
-        borderRadius: 6,
-        display: "block",
-        flexShrink: 0,
-        opacity: 0.9,
-      }}
-    />
-  );
-}
-
 function JoinChatPanel({ eventId, onJoin }: { eventId: string; onJoin: (identity: JoinedChatIdentity) => void }) {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
@@ -1736,7 +1651,6 @@ function JoinChatPanel({ eventId, onJoin }: { eventId: string; onJoin: (identity
         participantId: participant.id,
         sessionId: participant.session_id,
         displayName: participant.display_name,
-        avatarId: participant.avatar_id,
       };
       storeChatIdentity(eventId, identity);
       console.info("[live-chat-join-state]", {
@@ -1841,7 +1755,6 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
       {live ? (
         <form onSubmit={submitMessage} style={{ display: "grid", gap: "0.5rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", borderTop: "1px solid rgba(0,255,65,0.1)", paddingTop: "0.7rem" }}>
-            <ChatAvatar avatarId={identity.avatarId} />
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.05rem", letterSpacing: "0.06em", maxWidth: "min(26vw, 140px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{identity.displayName}</span>
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
             <input value={body} onChange={event => setBody(event.target.value)} disabled={Boolean(pendingSubmission)} maxLength={500} aria-label="Message" style={{ ...terminalInputStyle, fontSize: "1.05rem" }} />

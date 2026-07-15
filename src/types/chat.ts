@@ -6,7 +6,6 @@ export interface ChatMessage {
   user_id: string | null;
   participant_id: string | null;
   display_name: string;
-  avatar_id: string | null;
   body: string;
   status: ChatMessageStatus;
   client_token: string | null;
@@ -24,7 +23,6 @@ export interface ChatParticipant {
   session_id: string;
   display_name: string;
   normalized_name: string;
-  avatar_id: string;
   created_at: string;
   last_seen_at: string;
 }

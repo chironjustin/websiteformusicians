@@ -1,27 +1,12 @@
 import { supabase } from "@/lib/supabase";
 import type { ChatMessage, ChatMessageStatus, ChatParticipant, CreateAdminChatMessageInput, CreateVisitorChatMessageInput } from "@/types/chat";
 
-export const USER_AVATAR_IDS = [
-  "retro-1",
-  "retro-2",
-  "retro-3",
-  "retro-4",
-  "retro-5",
-  "retro-6",
-  "retro-7",
-  "retro-8",
-] as const;
-
 const CHAT_SESSION_KEY = "music-event-chat-session-id";
 const MAX_ADMIN_DISPLAY_NAME = 50;
 const MAX_BODY = 500;
 
 function cleanText(value: string, maxLength: number) {
   return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
-}
-
-export function isUserAvatarId(value: string | null | undefined): value is typeof USER_AVATAR_IDS[number] {
-  return Boolean(value && (USER_AVATAR_IDS as readonly string[]).includes(value));
 }
 
 function assertBody(body: string) {

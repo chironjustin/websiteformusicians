@@ -7,12 +7,11 @@ create table if not exists public.event_chat_participants (
   session_id uuid not null,
   display_name text not null,
   normalized_name text not null,
-  avatar_id text not null,
+  avatar_id text,
   created_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   constraint event_chat_participants_display_name_length check (char_length(display_name) between 1 and 16),
-  constraint event_chat_participants_normalized_name_length check (char_length(normalized_name) between 1 and 16),
-  constraint event_chat_participants_avatar_id_check check (avatar_id in ('retro-1', 'retro-2', 'retro-3', 'retro-4', 'retro-5', 'retro-6', 'retro-7', 'retro-8'))
+  constraint event_chat_participants_normalized_name_length check (char_length(normalized_name) between 1 and 16)
 );
 
 create table if not exists public.chat_messages (
@@ -34,7 +33,6 @@ create table if not exists public.chat_messages (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint chat_messages_status_check check (status in ('pending', 'approved', 'rejected')),
-  constraint chat_messages_avatar_id_check check (avatar_id is null or avatar_id in ('retro-1', 'retro-2', 'retro-3', 'retro-4', 'retro-5', 'retro-6', 'retro-7', 'retro-8')),
   constraint chat_messages_display_name_length check (char_length(display_name) between 1 and 50),
   constraint chat_messages_body_length check (char_length(body) between 1 and 500)
 );
@@ -153,106 +151,17 @@ as $$
   select lower(btrim(regexp_replace(coalesce(p_value, ''), '[[:space:]]+', ' ', 'g')));
 $$;
 
-drop function if exists public.reserve_event_chat_identity(uuid, text, text, text);
-
-create or replace function public.reserve_event_chat_identity(
-  p_event_id uuid,
-  p_session_id uuid,
-  p_display_name text,
-  p_normalized_name text,
-  p_avatar_id text
-)
-returns public.event_chat_participants
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  clean_display_name text;
-  clean_normalized_name text;
-  event_artist_name text;
-  existing_participant public.event_chat_participants;
-  inserted_participant public.event_chat_participants;
+do $$
 begin
-  clean_display_name := btrim(regexp_replace(coalesce(p_display_name, ''), '[[:space:]]+', ' ', 'g'));
-  clean_normalized_name := public.normalize_chat_name(clean_display_name);
-
-  if p_event_id is null then
-    raise exception 'chat_event_required';
+  if to_regprocedure('public.reserve_event_chat_identity(uuid, text, text, text)') is not null then
+    revoke all on function public.reserve_event_chat_identity(uuid, text, text, text) from public, anon, authenticated;
   end if;
 
-  if p_session_id is null then
-    raise exception 'chat_session_required';
+  if to_regprocedure('public.reserve_event_chat_identity(uuid, uuid, text, text, text)') is not null then
+    revoke all on function public.reserve_event_chat_identity(uuid, uuid, text, text, text) from public, anon, authenticated;
   end if;
-
-  if clean_display_name = '' or char_length(clean_display_name) > 16 then
-    raise exception 'chat_name_length';
-  end if;
-
-  if clean_normalized_name <> public.normalize_chat_name(p_normalized_name) then
-    raise exception 'chat_name_invalid';
-  end if;
-
-  if p_avatar_id not in ('retro-1', 'retro-2', 'retro-3', 'retro-4', 'retro-5', 'retro-6', 'retro-7', 'retro-8') then
-    raise exception 'chat_avatar_invalid';
-  end if;
-
-  select events.artist_name
-  into event_artist_name
-  from public.events
-  where events.id = p_event_id
-    and events.status in ('upcoming', 'live')
-    and events.starts_at is not null
-    and events.ends_at is not null
-    and events.starts_at <= now()
-    and events.ends_at > now();
-
-  if event_artist_name is null then
-    raise exception 'chat_event_not_live';
-  end if;
-
-  select *
-  into existing_participant
-  from public.event_chat_participants
-  where event_id = p_event_id
-    and session_id = p_session_id
-  limit 1;
-
-  if existing_participant.id is not null then
-    if existing_participant.normalized_name = public.normalize_chat_name(event_artist_name) then
-      raise exception 'chat_name_taken';
-    end if;
-    return existing_participant;
-  end if;
-
-  if clean_normalized_name = public.normalize_chat_name(event_artist_name) then
-    raise exception 'chat_name_taken';
-  end if;
-
-  insert into public.event_chat_participants (
-    event_id,
-    session_id,
-    display_name,
-    normalized_name,
-    avatar_id
-  )
-  values (
-    p_event_id,
-    p_session_id,
-    clean_display_name,
-    clean_normalized_name,
-    p_avatar_id
-  )
-  returning * into inserted_participant;
-
-  return inserted_participant;
-exception
-  when unique_violation then
-    raise exception 'chat_name_taken';
 end;
 $$;
-
-revoke all on function public.reserve_event_chat_identity(uuid, uuid, text, text, text) from public, anon, authenticated;
 
 create or replace function public.chat_generated_first_names()
 returns text[]
@@ -313,7 +222,15 @@ create or replace function public.join_event_chat(
   p_event_id uuid,
   p_session_id uuid
 )
-returns public.event_chat_participants
+returns table (
+  id uuid,
+  event_id uuid,
+  session_id uuid,
+  display_name text,
+  normalized_name text,
+  created_at timestamptz,
+  last_seen_at timestamptz
+)
 language plpgsql
 security definer
 set search_path = public
@@ -327,7 +244,6 @@ declare
   candidate_name text;
   normalized_candidate text;
   suffix text;
-  avatar text;
   attempt integer;
 begin
   if p_event_id is null then
@@ -357,22 +273,30 @@ begin
   select *
   into existing_participant
   from public.event_chat_participants
-  where event_id = p_event_id
-    and session_id = p_session_id
+  where event_chat_participants.event_id = p_event_id
+    and event_chat_participants.session_id = p_session_id
   limit 1;
 
   if existing_participant.id is not null then
     update public.event_chat_participants
     set last_seen_at = now()
-    where id = existing_participant.id
+    where event_chat_participants.id = existing_participant.id
     returning * into existing_participant;
 
-    return existing_participant;
+    return query
+      select
+        existing_participant.id,
+        existing_participant.event_id,
+        existing_participant.session_id,
+        existing_participant.display_name,
+        existing_participant.normalized_name,
+        existing_participant.created_at,
+        existing_participant.last_seen_at;
+    return;
   end if;
 
   names := public.chat_generated_first_names();
   base_name := names[1 + floor(random() * array_length(names, 1))::int];
-  avatar := 'retro-' || (1 + floor(random() * 8)::int)::text;
 
   for attempt in 0..8 loop
     if attempt = 0 then
@@ -398,7 +322,6 @@ begin
         session_id,
         display_name,
         normalized_name,
-        avatar_id,
         last_seen_at
       )
       values (
@@ -406,23 +329,40 @@ begin
         p_session_id,
         candidate_name,
         normalized_candidate,
-        avatar,
         now()
       )
       returning * into inserted_participant;
 
-      return inserted_participant;
+      return query
+        select
+          inserted_participant.id,
+          inserted_participant.event_id,
+          inserted_participant.session_id,
+          inserted_participant.display_name,
+          inserted_participant.normalized_name,
+          inserted_participant.created_at,
+          inserted_participant.last_seen_at;
+      return;
     exception
       when unique_violation then
         select *
         into existing_participant
         from public.event_chat_participants
-        where event_id = p_event_id
-          and session_id = p_session_id
+        where event_chat_participants.event_id = p_event_id
+          and event_chat_participants.session_id = p_session_id
         limit 1;
 
         if existing_participant.id is not null then
-          return existing_participant;
+          return query
+            select
+              existing_participant.id,
+              existing_participant.event_id,
+              existing_participant.session_id,
+              existing_participant.display_name,
+              existing_participant.normalized_name,
+              existing_participant.created_at,
+              existing_participant.last_seen_at;
+          return;
         end if;
     end;
   end loop;
@@ -435,7 +375,6 @@ begin
     session_id,
     display_name,
     normalized_name,
-    avatar_id,
     last_seen_at
   )
   values (
@@ -443,12 +382,20 @@ begin
     p_session_id,
     candidate_name,
     normalized_candidate,
-    avatar,
     now()
   )
   returning * into inserted_participant;
 
-  return inserted_participant;
+  return query
+    select
+      inserted_participant.id,
+      inserted_participant.event_id,
+      inserted_participant.session_id,
+      inserted_participant.display_name,
+      inserted_participant.normalized_name,
+      inserted_participant.created_at,
+      inserted_participant.last_seen_at;
+  return;
 end;
 $$;
 
@@ -508,8 +455,8 @@ begin
   select *
   into participant
   from public.event_chat_participants
-  where id = p_participant_id
-    and event_id = p_event_id;
+  where event_chat_participants.id = p_participant_id
+    and event_chat_participants.event_id = p_event_id;
 
   if participant.id is null then
     raise exception 'A reserved chat identity is required.';
@@ -520,7 +467,6 @@ begin
     participant_id,
     user_id,
     display_name,
-    avatar_id,
     body,
     status,
     client_token,
@@ -536,7 +482,6 @@ begin
     participant.id,
     null,
     participant.display_name,
-    participant.avatar_id,
     normalized_body,
     'pending',
     p_client_token,
