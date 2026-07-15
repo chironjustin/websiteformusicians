@@ -131,7 +131,7 @@ assert(chatSchema.includes("chat_messages_event_status_created_idx") && chatSche
 assert(chatSchema.includes("create or replace function public.submit_chat_message"), "Chat schema must provide a public pending-message submit RPC.");
 assert(chatSchema.includes("create table if not exists public.event_chat_participants") && chatSchema.includes("event_chat_participants_event_normalized_name_idx"), "Chat schema must enforce event-scoped temporary username uniqueness.");
 assert(chatSchema.includes("session_id uuid") && chatSchema.includes("event_chat_participants_event_session_idx"), "Chat schema must preserve generated chat identity by event and session.");
-assert(chatSchema.includes("create or replace function public.join_event_chat") && chatSchema.includes("chat_generated_first_names") && chatSchema.includes("6500"), "Chat schema must generate anonymous event identities server-side from a large international name pool.");
+assert(chatSchema.includes("create or replace function public.join_event_chat"), "Chat schema must generate anonymous event identities server-side.");
 assert(chatSchema.includes("revoke select, insert, update, delete on public.event_chat_participants from anon, authenticated"), "Participant identity rows must not be directly enumerable by public clients.");
 assert(chatSchema.includes("returns table") && !chatSchema.includes("p_avatar_id text") && !chatSchema.includes("avatar :="), "Generated identity RPC must return only identity fields and must not accept or assign avatars.");
 assert(chatSchema.includes("revoke insert on public.chat_messages from anon"), "Anonymous visitors must not rely on fragile direct table inserts.");
@@ -145,6 +145,14 @@ assert(chatSchema.includes("notify pgrst, 'reload schema'"), "Chat schema must r
 const noAvatarIdentityMigration = readFileSync("supabase/chat-generated-identity-remove-avatars.sql", "utf8");
 assert(noAvatarIdentityMigration.includes("alter column avatar_id drop not null") && noAvatarIdentityMigration.includes("drop constraint if exists event_chat_participants_avatar_id_check"), "No-avatar identity migration must make historical avatar columns non-blocking.");
 assert(noAvatarIdentityMigration.includes("returns table") && !noAvatarIdentityMigration.includes("p_avatar_id") && !noAvatarIdentityMigration.includes("participant.avatar_id"), "No-avatar identity migration must replace active RPCs without avatar inputs or message avatar copying.");
+
+const namePoolMigration = readFileSync("supabase/chat-name-pool-migration.sql", "utf8");
+assert(namePoolMigration.includes("create table if not exists public.chat_name_pool") && namePoolMigration.includes("region_group in ('western', 'international')"), "Generated chat names must be stored in a weighted database pool.");
+assert(namePoolMigration.includes("chat_name_pool_normalized_name_idx") && namePoolMigration.includes("on conflict (normalized_name)"), "Name pool seeding must deduplicate normalized names.");
+assert(namePoolMigration.includes("chat_name_pool_exclusions") && namePoolMigration.includes("extremist/historical abuse") && namePoolMigration.includes("reserved system name"), "Unsafe supplied names must be explicitly excluded with reason categories.");
+assert(namePoolMigration.includes("random() < 0.7") && !namePoolMigration.includes("foreign"), "Name pool selection must use the western/international weighting without forbidden terminology.");
+assert(noAvatarIdentityMigration.includes("for suffix_number in 1..50") && noAvatarIdentityMigration.includes("suffix_number = 1") && noAvatarIdentityMigration.includes("|| suffix_number::text"), "Generated names must use sequential event-level suffixes instead of random numeric suffixes.");
+assert(!noAvatarIdentityMigration.includes("floor(random() * 990)") && !namePoolMigration.includes("floor(random() * 990)") && !namePoolMigration.includes("participant.avatar_id"), "New name-pool identity flow must not use random suffixes or restore avatars.");
 
 const eventTiming = readFileSync("src/lib/eventTiming.ts", "utf8");
 assert(eventTiming.includes("return event.ends_at;"), "Live countdown target must use explicit ends_at.");

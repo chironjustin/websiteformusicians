@@ -33,12 +33,12 @@ declare
   event_artist_name text;
   existing_participant public.event_chat_participants;
   inserted_participant public.event_chat_participants;
-  names text[];
   base_name text;
+  base_normalized text;
   candidate_name text;
   normalized_candidate text;
-  suffix text;
   attempt integer;
+  suffix_number integer;
 begin
   if p_event_id is null then
     raise exception 'chat_event_required';
@@ -89,107 +89,88 @@ begin
     return;
   end if;
 
-  names := public.chat_generated_first_names();
-  base_name := names[1 + floor(random() * array_length(names, 1))::int];
+  for attempt in 1..25 loop
+    select picked.base_name, picked.normalized_name
+    into base_name, base_normalized
+    from public.pick_chat_base_name(event_artist_name) picked
+    limit 1;
 
-  for attempt in 0..8 loop
-    if attempt = 0 then
-      candidate_name := left(base_name, 16);
-    else
-      suffix := (10 + floor(random() * 990)::int)::text;
-      candidate_name := left(base_name, greatest(1, 16 - char_length(suffix))) || suffix;
+    if base_name is null then
+      raise exception 'chat_name_pool_empty';
     end if;
 
-    normalized_candidate := public.normalize_chat_name(candidate_name);
+    perform pg_advisory_xact_lock(hashtext(p_event_id::text || ':' || base_normalized));
 
-    if normalized_candidate in ('admin', 'artist', 'moderator', 'system', 'support') then
-      continue;
-    end if;
+    for suffix_number in 1..50 loop
+      if suffix_number = 1 then
+        candidate_name := left(base_name, 16);
+      else
+        candidate_name := left(base_name, greatest(1, 16 - char_length(suffix_number::text))) || suffix_number::text;
+      end if;
 
-    if normalized_candidate = public.normalize_chat_name(event_artist_name) then
-      continue;
-    end if;
+      normalized_candidate := public.normalize_chat_name(candidate_name);
 
-    begin
-      insert into public.event_chat_participants (
-        event_id,
-        session_id,
-        display_name,
-        normalized_name,
-        last_seen_at
-      )
-      values (
-        p_event_id,
-        p_session_id,
-        candidate_name,
-        normalized_candidate,
-        now()
-      )
-      returning * into inserted_participant;
+      if normalized_candidate in ('admin', 'administrator', 'artist', 'moderator', 'mod', 'official', 'system', 'support') then
+        continue;
+      end if;
 
-      return query
-        select
-          inserted_participant.id,
-          inserted_participant.event_id,
-          inserted_participant.session_id,
-          inserted_participant.display_name,
-          inserted_participant.normalized_name,
-          inserted_participant.created_at,
-          inserted_participant.last_seen_at;
-      return;
-    exception
-      when unique_violation then
-        select *
-        into existing_participant
-        from public.event_chat_participants
-        where event_chat_participants.event_id = p_event_id
-          and event_chat_participants.session_id = p_session_id
-        limit 1;
+      if normalized_candidate = public.normalize_chat_name(event_artist_name) then
+        continue;
+      end if;
 
-        if existing_participant.id is not null then
-          return query
-            select
-              existing_participant.id,
-              existing_participant.event_id,
-              existing_participant.session_id,
-              existing_participant.display_name,
-              existing_participant.normalized_name,
-              existing_participant.created_at,
-              existing_participant.last_seen_at;
-          return;
-        end if;
+      begin
+        insert into public.event_chat_participants (
+          event_id,
+          session_id,
+          display_name,
+          normalized_name,
+          last_seen_at
+        )
+        values (
+          p_event_id,
+          p_session_id,
+          candidate_name,
+          normalized_candidate,
+          now()
+        )
+        returning * into inserted_participant;
+
+        return query
+          select
+            inserted_participant.id,
+            inserted_participant.event_id,
+            inserted_participant.session_id,
+            inserted_participant.display_name,
+            inserted_participant.normalized_name,
+            inserted_participant.created_at,
+            inserted_participant.last_seen_at;
+        return;
+      exception
+        when unique_violation then
+          select *
+          into existing_participant
+          from public.event_chat_participants
+          where event_chat_participants.event_id = p_event_id
+            and event_chat_participants.session_id = p_session_id
+          limit 1;
+
+          if existing_participant.id is not null then
+            return query
+              select
+                existing_participant.id,
+                existing_participant.event_id,
+                existing_participant.session_id,
+                existing_participant.display_name,
+                existing_participant.normalized_name,
+                existing_participant.created_at,
+                existing_participant.last_seen_at;
+            return;
+          end if;
+      end;
     end;
   end loop;
 
-  candidate_name := 'Aiko' || (1000 + floor(random() * 9000)::int)::text;
-  normalized_candidate := public.normalize_chat_name(candidate_name);
-
-  insert into public.event_chat_participants (
-    event_id,
-    session_id,
-    display_name,
-    normalized_name,
-    last_seen_at
-  )
-  values (
-    p_event_id,
-    p_session_id,
-    candidate_name,
-    normalized_candidate,
-    now()
-  )
-  returning * into inserted_participant;
-
-  return query
-    select
-      inserted_participant.id,
-      inserted_participant.event_id,
-      inserted_participant.session_id,
-      inserted_participant.display_name,
-      inserted_participant.normalized_name,
-      inserted_participant.created_at,
-      inserted_participant.last_seen_at;
-  return;
+  raise exception 'chat_name_allocation_failed';
 end;
 $$;
 
