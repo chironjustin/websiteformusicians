@@ -292,6 +292,7 @@ begin
         candidate_name := left(base_name, 16);
       else
         candidate_name := left(base_name, greatest(1, 16 - char_length(suffix_number::text))) || suffix_number::text;
+        raise log 'chat_name_suffix base_name=% suffix_number=% suffix_added=%', base_name, suffix_number, true;
       end if;
 
       normalized_candidate := public.normalize_chat_name(candidate_name);

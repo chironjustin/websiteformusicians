@@ -418,12 +418,31 @@ as $$
 declare
   target_region text;
   artist_normalized text;
+  eligible_count integer;
+  selected_offset integer;
+  selected_pool_id bigint;
 begin
   target_region := case when random() < 0.7 then 'western' else 'international' end;
   artist_normalized := public.normalize_chat_name(p_artist_name);
 
-  return query
-    select pool.base_name, pool.normalized_name
+  select count(*)::integer
+  into eligible_count
+  from public.chat_name_pool pool
+  where pool.is_active
+    and pool.region_group = target_region
+    and pool.normalized_name not in ('admin', 'administrator', 'artist', 'moderator', 'mod', 'official', 'system', 'support')
+    and pool.normalized_name <> artist_normalized
+    and not exists (
+      select 1
+      from public.chat_name_pool_exclusions excluded
+      where excluded.normalized_name = pool.normalized_name
+    );
+
+  if eligible_count > 0 then
+    selected_offset := floor(random() * eligible_count)::integer;
+
+    select pool.id, pool.base_name, pool.normalized_name
+    into selected_pool_id, base_name, normalized_name
     from public.chat_name_pool pool
     where pool.is_active
       and pool.region_group = target_region
@@ -434,24 +453,50 @@ begin
         from public.chat_name_pool_exclusions excluded
         where excluded.normalized_name = pool.normalized_name
       )
-    order by random()
+    order by pool.id
+    offset selected_offset
     limit 1;
 
-  if not found then
-    return query
-      select pool.base_name, pool.normalized_name
-      from public.chat_name_pool pool
-      where pool.is_active
-        and pool.normalized_name not in ('admin', 'administrator', 'artist', 'moderator', 'mod', 'official', 'system', 'support')
-        and pool.normalized_name <> artist_normalized
-        and not exists (
-          select 1
-          from public.chat_name_pool_exclusions excluded
-          where excluded.normalized_name = pool.normalized_name
-        )
-      order by random()
-      limit 1;
+    raise log 'chat_name_pick region=% eligible_count=% selected_pool_id=% suffix_added=%', target_region, eligible_count, selected_pool_id, false;
+    return next;
+    return;
   end if;
+
+  select count(*)::integer
+  into eligible_count
+  from public.chat_name_pool pool
+  where pool.is_active
+    and pool.normalized_name not in ('admin', 'administrator', 'artist', 'moderator', 'mod', 'official', 'system', 'support')
+    and pool.normalized_name <> artist_normalized
+    and not exists (
+      select 1
+      from public.chat_name_pool_exclusions excluded
+      where excluded.normalized_name = pool.normalized_name
+    );
+
+  if eligible_count <= 0 then
+    return;
+  end if;
+
+  selected_offset := floor(random() * eligible_count)::integer;
+
+  select pool.id, pool.base_name, pool.normalized_name
+  into selected_pool_id, base_name, normalized_name
+  from public.chat_name_pool pool
+  where pool.is_active
+    and pool.normalized_name not in ('admin', 'administrator', 'artist', 'moderator', 'mod', 'official', 'system', 'support')
+    and pool.normalized_name <> artist_normalized
+    and not exists (
+      select 1
+      from public.chat_name_pool_exclusions excluded
+      where excluded.normalized_name = pool.normalized_name
+    )
+  order by pool.id
+  offset selected_offset
+  limit 1;
+
+  raise log 'chat_name_pick region=% eligible_count=% selected_pool_id=% suffix_added=%', 'fallback', eligible_count, selected_pool_id, false;
+  return next;
 end;
 $$;
 
@@ -585,6 +630,7 @@ begin
         candidate_name := left(base_name, 16);
       else
         candidate_name := left(base_name, greatest(1, 16 - char_length(suffix_number::text))) || suffix_number::text;
+        raise log 'chat_name_suffix base_name=% suffix_number=% suffix_added=%', base_name, suffix_number, true;
       end if;
 
       normalized_candidate := public.normalize_chat_name(candidate_name);

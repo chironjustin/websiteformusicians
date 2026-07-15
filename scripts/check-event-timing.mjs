@@ -156,6 +156,8 @@ assert(namePoolMigration.includes("chat_name_pool_normalized_name_idx") && nameP
 assert(namePoolMigration.includes("chat_name_pool_exclusions") && namePoolMigration.includes("extremist/historical abuse") && namePoolMigration.includes("reserved system name"), "Unsafe supplied names must be explicitly excluded with reason categories.");
 assert(namePoolMigration.includes("drop function if exists public.chat_generated_first_names()"), "Name-pool migration must remove the obsolete synthetic name generator.");
 assert(namePoolMigration.includes("random() < 0.7") && !namePoolMigration.includes("foreign"), "Name pool selection must use the western/international weighting without forbidden terminology.");
+assert(namePoolMigration.includes("selected_offset := floor(random() * eligible_count)::integer") && namePoolMigration.includes("order by pool.id") && !namePoolMigration.includes("order by random()"), "Name pool selection must choose a random offset across the full eligible pool instead of relying on row order or order-by-random fallback behavior.");
+assert(namePoolMigration.includes("raise log 'chat_name_pick") && namePoolMigration.includes("selected_pool_id"), "Name pool selection must log safe development diagnostics for selected region, pool size, and row id.");
 assert(namePoolMigration.includes("should_reassign_existing") && namePoolMigration.includes("regexp_replace(existing_participant.display_name"), "Name-pool migration must repair existing synthetic participant names on the next join.");
 
 const generatedIdentityMigration = readFileSync("supabase/chat-generated-identity-migration.sql", "utf8");
@@ -165,6 +167,8 @@ assert(generatedIdentityMigration.includes("should_reassign_existing") && genera
 
 const curatedNameRepairMigration = readFileSync("supabase/chat-curated-name-flow-repair.sql", "utf8");
 assert(curatedNameRepairMigration.includes("create table if not exists public.chat_name_pool") && curatedNameRepairMigration.includes("create or replace function public.pick_chat_base_name"), "Curated-name repair migration must install the curated pool and picker when they are missing.");
+assert(curatedNameRepairMigration.includes("selected_offset := floor(random() * eligible_count)::integer") && curatedNameRepairMigration.includes("order by pool.id") && !curatedNameRepairMigration.includes("order by random()"), "Curated-name repair migration must sample a random offset across the full eligible pool.");
+assert(curatedNameRepairMigration.includes("raise log 'chat_name_pick") && curatedNameRepairMigration.includes("selected_pool_id"), "Curated-name repair migration must log safe name-selection diagnostics.");
 assert(curatedNameRepairMigration.includes("drop function if exists public.chat_generated_first_names()") && curatedNameRepairMigration.includes("from public.pick_chat_base_name(event_artist_name) picked"), "Curated-name repair migration must remove the legacy generator and reinstall the pool-backed join function.");
 assert(curatedNameRepairMigration.includes("should_reassign_existing") && curatedNameRepairMigration.includes("regexp_replace(existing_participant.display_name"), "Curated-name repair migration must repair old synthetic rows on the next join.");
 
@@ -189,6 +193,7 @@ for (const [label, source] of [
 }
 
 assert(noAvatarIdentityMigration.includes("for suffix_number in 1..50") && noAvatarIdentityMigration.includes("suffix_number = 1") && noAvatarIdentityMigration.includes("|| suffix_number::text"), "Generated names must use sequential event-level suffixes instead of random numeric suffixes.");
+assert(chatSchema.includes("chat_name_suffix") && generatedIdentityMigration.includes("chat_name_suffix") && noAvatarIdentityMigration.includes("chat_name_suffix") && namePoolMigration.includes("chat_name_suffix") && curatedNameRepairMigration.includes("chat_name_suffix"), "Suffix allocation must log safe development diagnostics when a numeric suffix is added.");
 assert(!noAvatarIdentityMigration.includes("floor(random() * 990)") && !namePoolMigration.includes("floor(random() * 990)") && !namePoolMigration.includes("participant.avatar_id"), "New name-pool identity flow must not use random suffixes or restore avatars.");
 
 const eventTiming = readFileSync("src/lib/eventTiming.ts", "utf8");
