@@ -1,4 +1,4 @@
-export type ChatMessageStatus = "pending" | "approved" | "rejected";
+export type ChatMessageStatus = "pending" | "queued" | "approved" | "rejected";
 export type ChatRiskLevel = "low" | "medium" | "high";
 
 export interface ChatMessage {
@@ -28,6 +28,10 @@ export interface ChatMessage {
   classified_at?: string | null;
   classifier_version?: string | null;
   auto_publish_eligible?: boolean | null;
+  queued_at?: string | null;
+  queue_priority?: number | null;
+  queue_attempt_count?: number | null;
+  last_queue_error?: string | null;
   created_at: string;
   updated_at: string;
 }

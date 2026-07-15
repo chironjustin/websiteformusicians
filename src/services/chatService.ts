@@ -191,7 +191,7 @@ export async function sendAdminMessage(input: CreateAdminChatMessageInput) {
   return data;
 }
 
-export async function setMessageStatus(id: string, status: ChatMessageStatus) {
+export async function setMessageStatus(id: string, status: Extract<ChatMessageStatus, "approved" | "rejected">) {
   const { data, error } = await supabase.rpc("moderate_chat_message", {
     p_message_id: id,
     p_next_status: status,

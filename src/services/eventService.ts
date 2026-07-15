@@ -126,6 +126,21 @@ export async function updateEvent(id: string, input: UpdateEventInput) {
   return data;
 }
 
+export async function setEventChatAutoPublishSettings(
+  id: string,
+  input: Pick<UpdateEventInput, "auto_publish_enabled" | "queue_paused">,
+) {
+  await requireUserId();
+  const { data, error } = await supabase.rpc("set_event_chat_auto_publish_settings", {
+    p_auto_publish_enabled: input.auto_publish_enabled ?? null,
+    p_event_id: id,
+    p_queue_paused: input.queue_paused ?? null,
+  });
+
+  if (error) throw toUsefulError(error, "Unable to update chat queue settings.");
+  return data as MusicEvent;
+}
+
 export async function startEvent(id: string, latest?: UpdateEventInput) {
   const existing = await getEventById(id);
   if (!existing) throw new Error("Event not found.");

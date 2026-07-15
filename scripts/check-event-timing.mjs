@@ -148,7 +148,7 @@ assert(chatSchema.includes("when chat_messages.participant_id = p_participant_id
 assert(chatSchema.includes("published_at = case when p_next_status = 'approved' then v_now else null end") && chatSchema.includes("approved_at = case when p_next_status = 'approved' then v_now"), "Manual approval must assign approved_at and published_at from the same trusted database timestamp.");
 assert(chatSchema.includes("risk_level text") && chatSchema.includes("risk_score integer") && chatSchema.includes("risk_flags text[]") && chatSchema.includes("auto_publish_eligible boolean"), "Chat schema must store deterministic risk classification metadata.");
 assert(chatSchema.includes("create or replace function public.classify_chat_message") && chatSchema.includes("chat_message_risk_classifier_version") && chatSchema.includes("rules-v1"), "Chat schema must include the server-side deterministic chat risk classifier.");
-assert(chatSchema.includes("classification := public.classify_chat_message") && chatSchema.includes("status = case when classification->>'riskLevel' = 'high' then 'rejected' else 'pending' end"), "Visitor submit RPC must classify accepted messages and auto-reject only high-risk messages.");
+assert(chatSchema.includes("classification := public.classify_chat_message") && chatSchema.includes("then 'queued'") && chatSchema.includes("then 'rejected'"), "Visitor submit RPC must classify accepted messages, queue low-risk messages, and auto-reject only high-risk messages.");
 assert(chatSchema.includes("'message_classified'") && chatSchema.includes("'message_auto_rejected'"), "Chat moderation audit must record classification and automatic rule rejections.");
 assert(chatSchema.includes("create table if not exists public.event_chat_participants") && chatSchema.includes("event_chat_participants_event_normalized_name_idx"), "Chat schema must enforce event-scoped temporary username uniqueness.");
 assert(chatSchema.includes("session_id uuid") && chatSchema.includes("event_chat_participants_event_session_idx"), "Chat schema must preserve generated chat identity by event and session.");
@@ -280,6 +280,15 @@ assert(riskMigration.includes("match_mode in ('exact', 'substring', 'word')") &&
 assert(!riskMigration.includes("[[:alpha:]]+ is terrible") && !riskMigration.includes("[[:alpha:]]+ is trash"), "Targeted harassment rules must not classify generic content criticism as person-directed abuse.");
 assert(riskMigration.includes("risk_level = 'medium'") && riskMigration.includes("CLASSIFIER_FAILURE") && riskMigration.includes("auto_publish_eligible = false"), "Classifier failures must remain private and ineligible.");
 assert(!riskMigration.includes("status = case when classification->>'riskLevel' = 'low' then 'approved'") && !riskMigration.includes("published_at = clock_timestamp()"), "Step 4 must not automatically approve or publish classified messages.");
+
+const queueMigration = readFileSync("supabase/chat-auto-publish-queue.sql", "utf8");
+assert(queueMigration.includes("status in ('pending', 'queued', 'approved', 'rejected')") && queueMigration.includes("queued_at timestamptz") && queueMigration.includes("queue_attempt_count integer"), "Auto-publish queue migration must add queued status and queue metadata.");
+assert(queueMigration.includes("when classification->>'riskLevel' = 'low'") && queueMigration.includes("then 'queued'") && queueMigration.includes("'message_queued'"), "Low-risk eligible visitor messages must enter the durable queue.");
+assert(queueMigration.includes("create or replace function public.process_chat_auto_publish_queue") && queueMigration.includes("pg_try_advisory_xact_lock") && queueMigration.includes("approval_source = 'queue'"), "Queue worker must use event-scoped locking and queue approval metadata.");
+assert(queueMigration.includes("next_auto_publish_at = v_now + interval '3 seconds'") && queueMigration.includes("'3 seconds'"), "Step 5 queue worker must enforce the fixed three-second publication interval.");
+assert(queueMigration.includes("auto_publish_enabled boolean not null default false") && queueMigration.includes("queue_paused boolean not null default false") && queueMigration.includes("set_event_chat_auto_publish_settings"), "Events must expose controlled auto-publish and pause settings.");
+assert(queueMigration.includes("order by chat_messages.queue_priority desc, chat_messages.queued_at asc, chat_messages.id asc"), "Step 5 queue selection must remain FIFO by priority and queued time.");
+assert(!queueMigration.includes("random()") && !queueMigration.includes("sample") && !queueMigration.includes("burst"), "Step 5 must not implement randomized timing, sampling, or bursts.");
 
 const cronSql = readFileSync("supabase/event-status-cron.sql", "utf8");
 assert(cronSql.includes("status = 'upcoming'") && cronSql.includes("starts_at <= now()"), "Cron must promote due upcoming events to live.");

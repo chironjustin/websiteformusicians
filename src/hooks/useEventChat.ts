@@ -72,6 +72,7 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode,
 
   const grouped = useMemo(() => ({
     pending: messages.filter(message => message.status === "pending"),
+    queued: messages.filter(message => message.status === "queued"),
     approved: messages.filter(message => message.status === "approved"),
     rejected: messages.filter(message => message.status === "rejected"),
   }), [messages]);

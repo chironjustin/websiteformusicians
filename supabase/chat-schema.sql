@@ -42,11 +42,15 @@ create table if not exists public.chat_messages (
   classified_at timestamptz,
   classifier_version text,
   auto_publish_eligible boolean not null default false,
+  queued_at timestamptz,
+  queue_priority integer not null default 0,
+  queue_attempt_count integer not null default 0,
+  last_queue_error text,
   legacy_assignment_confirmed_at timestamptz,
   legacy_assignment_confirmed_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint chat_messages_status_check check (status in ('pending', 'approved', 'rejected')),
+  constraint chat_messages_status_check check (status in ('pending', 'queued', 'approved', 'rejected')),
   constraint chat_messages_display_name_length check (char_length(display_name) between 1 and 50),
   constraint chat_messages_body_length check (char_length(btrim(body)) between 1 and 400),
   constraint chat_messages_risk_level_check check (risk_level is null or risk_level in ('low', 'medium', 'high')),
@@ -55,7 +59,13 @@ create table if not exists public.chat_messages (
     (status = 'approved' and published_at is not null)
     or
     (status <> 'approved' and published_at is null)
-  )
+  ),
+  constraint chat_messages_queue_state_check check (
+    (status = 'queued' and queued_at is not null and published_at is null)
+    or
+    (status <> 'queued')
+  ),
+  constraint chat_messages_queue_attempt_count_check check (queue_attempt_count >= 0)
 );
 
 create unique index if not exists event_chat_participants_event_normalized_name_idx on public.event_chat_participants(event_id, normalized_name);
@@ -68,6 +78,12 @@ create index if not exists chat_messages_event_client_token_idx on public.chat_m
 create index if not exists chat_messages_event_participant_idx on public.chat_messages(event_id, participant_id) where participant_id is not null;
 create index if not exists chat_messages_event_participant_created_idx on public.chat_messages(event_id, participant_id, created_at desc) where event_id is not null and participant_id is not null;
 create index if not exists chat_messages_created_at_idx on public.chat_messages(created_at);
+create index if not exists chat_messages_event_queue_idx
+on public.chat_messages(event_id, status, queue_priority desc, queued_at, id)
+where status = 'queued';
+create index if not exists chat_messages_event_auto_publish_idx
+on public.chat_messages(event_id, auto_publish_eligible, status, queued_at)
+where auto_publish_eligible = true;
 create unique index if not exists chat_messages_event_participant_client_token_idx
 on public.chat_messages(event_id, participant_id, client_token)
 where event_id is not null
@@ -77,10 +93,10 @@ where event_id is not null
 create table if not exists public.chat_message_moderation_audit (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events(id) on delete cascade,
-  message_id uuid not null references public.chat_messages(id) on delete cascade,
+  message_id uuid references public.chat_messages(id) on delete cascade,
   participant_id uuid references public.event_chat_participants(id) on delete set null,
   actor_id uuid references auth.users(id) on delete set null,
-  action text not null check (action in ('message_approved', 'message_rejected', 'message_classified', 'message_auto_rejected')),
+  action text not null check (action in ('message_approved', 'message_rejected', 'message_classified', 'message_auto_rejected', 'message_queued', 'message_auto_approved', 'queue_paused', 'queue_resumed', 'auto_publish_enabled', 'auto_publish_disabled')),
   previous_status text not null,
   new_status text not null,
   reason text,
@@ -179,6 +195,9 @@ execute function public.set_updated_at();
 alter table public.chat_messages enable row level security;
 alter table public.event_chat_participants enable row level security;
 alter table public.chat_message_moderation_audit enable row level security;
+
+alter table public.chat_message_moderation_audit
+alter column message_id drop not null;
 
 grant insert on public.chat_messages to authenticated;
 revoke insert on public.chat_messages from anon;
@@ -943,7 +962,15 @@ begin
       classified_at = v_now,
       classifier_version = classification->>'classifierVersion',
       auto_publish_eligible = (classification->>'autoPublishEligible')::boolean,
-      status = case when classification->>'riskLevel' = 'high' then 'rejected' else 'pending' end,
+      status = case
+        when classification->>'riskLevel' = 'high' then 'rejected'
+        when classification->>'riskLevel' = 'low' and (classification->>'autoPublishEligible')::boolean then 'queued'
+        else 'pending'
+      end,
+      queued_at = case
+        when classification->>'riskLevel' = 'low' and (classification->>'autoPublishEligible')::boolean then v_now
+        else null
+      end,
       rejected_at = case when classification->>'riskLevel' = 'high' then v_now else rejected_at end,
       rejection_source = case when classification->>'riskLevel' = 'high' then 'automatic_rules' else rejection_source end,
       rejection_reason = case when classification->>'riskLevel' = 'high' then 'automatic_rules' else rejection_reason end
@@ -977,7 +1004,34 @@ begin
       inserted_message.classifier_version
     );
 
-    if inserted_message.status = 'rejected' then
+    if inserted_message.status = 'queued' then
+      insert into public.chat_message_moderation_audit (
+        event_id,
+        message_id,
+        participant_id,
+        actor_id,
+        action,
+        previous_status,
+        new_status,
+        reason,
+        risk_level,
+        risk_flags,
+        classifier_version
+      )
+      values (
+        inserted_message.event_id,
+        inserted_message.id,
+        inserted_message.participant_id,
+        null,
+        'message_queued',
+        'pending',
+        'queued',
+        null,
+        inserted_message.risk_level,
+        inserted_message.risk_flags,
+        inserted_message.classifier_version
+      );
+    elsif inserted_message.status = 'rejected' then
       insert into public.chat_message_moderation_audit (
         event_id,
         message_id,
@@ -1016,7 +1070,8 @@ begin
         classified_at = v_now,
         classifier_version = public.chat_message_risk_classifier_version(),
         auto_publish_eligible = false,
-        status = 'pending'
+        status = 'pending',
+        queued_at = null
       where id = inserted_message.id
       returning * into inserted_message;
   end;
@@ -1234,7 +1289,7 @@ begin
     return target_message;
   end if;
 
-  if target_message.status not in ('pending', 'rejected') then
+  if target_message.status not in ('pending', 'queued', 'rejected') then
     raise exception 'MESSAGE_ALREADY_MODERATED';
   end if;
 
@@ -1254,7 +1309,9 @@ begin
     approval_source = case when p_next_status = 'approved' then 'manual' else approval_source end,
     rejected_at = case when p_next_status = 'rejected' then v_now else rejected_at end,
     rejected_by = case when p_next_status = 'rejected' then auth.uid() else rejected_by end,
-    rejection_reason = case when p_next_status = 'rejected' then cleaned_reason else rejection_reason end
+    rejection_reason = case when p_next_status = 'rejected' then cleaned_reason else rejection_reason end,
+    queued_at = case when p_next_status = 'rejected' then null else queued_at end,
+    last_queue_error = case when p_next_status = 'approved' then null else last_queue_error end
   where id = target_message.id
   returning * into updated_message;
 
@@ -1292,7 +1349,7 @@ $$;
 revoke all on function public.moderate_chat_message(uuid, text, text) from public;
 grant execute on function public.moderate_chat_message(uuid, text, text) to authenticated;
 
-drop policy if exists "Authenticated admins can assign unassigned legacy chat messages" on public.chat_messages;
+drop policy if exists "Authenticated admins can assign unassigned legacy chat messages"drop policy if exists "Authenticated admins can assign unassigned legacy chat messages" on public.chat_messages;
 create policy "Authenticated admins can assign unassigned legacy chat messages"
 on public.chat_messages
 for update
@@ -1320,6 +1377,241 @@ using (
 );
 
 -- Optional but recommended for realtime subscriptions:
+create or replace function public.set_event_chat_auto_publish_settings(
+  p_event_id uuid,
+  p_auto_publish_enabled boolean default null,
+  p_queue_paused boolean default null
+)
+returns public.events
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_event public.events;
+  updated_event public.events;
+begin
+  if auth.uid() is null then
+    raise exception 'NOT_EVENT_ADMIN';
+  end if;
+
+  select *
+  into target_event
+  from public.events
+  where id = p_event_id
+    and owner_id = auth.uid()
+  for update;
+
+  if target_event.id is null then
+    raise exception 'NOT_EVENT_ADMIN';
+  end if;
+
+  update public.events
+  set
+    auto_publish_enabled = coalesce(p_auto_publish_enabled, auto_publish_enabled),
+    queue_paused = coalesce(p_queue_paused, queue_paused)
+  where id = target_event.id
+  returning * into updated_event;
+
+  if p_auto_publish_enabled is not null and p_auto_publish_enabled is distinct from target_event.auto_publish_enabled then
+    insert into public.chat_message_moderation_audit (
+      event_id,
+      message_id,
+      participant_id,
+      actor_id,
+      action,
+      previous_status,
+      new_status,
+      reason
+    )
+    values (
+      updated_event.id,
+      null,
+      null,
+      auth.uid(),
+      case when p_auto_publish_enabled then 'auto_publish_enabled' else 'auto_publish_disabled' end,
+      case when target_event.auto_publish_enabled then 'enabled' else 'disabled' end,
+      case when updated_event.auto_publish_enabled then 'enabled' else 'disabled' end,
+      null
+    );
+  end if;
+
+  if p_queue_paused is not null and p_queue_paused is distinct from target_event.queue_paused then
+    insert into public.chat_message_moderation_audit (
+      event_id,
+      message_id,
+      participant_id,
+      actor_id,
+      action,
+      previous_status,
+      new_status,
+      reason
+    )
+    values (
+      updated_event.id,
+      null,
+      null,
+      auth.uid(),
+      case when p_queue_paused then 'queue_paused' else 'queue_resumed' end,
+      case when target_event.queue_paused then 'paused' else 'running' end,
+      case when updated_event.queue_paused then 'paused' else 'running' end,
+      null
+    );
+  end if;
+
+  return updated_event;
+end;
+$$;
+
+revoke all on function public.set_event_chat_auto_publish_settings(uuid, boolean, boolean) from public;
+grant execute on function public.set_event_chat_auto_publish_settings(uuid, boolean, boolean) to authenticated;
+
+create extension if not exists pg_cron with schema extensions;
+
+create or replace function public.process_chat_auto_publish_queue(p_event_id uuid default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  event_record public.events;
+  message_record public.chat_messages;
+  updated_message public.chat_messages;
+  v_now timestamptz;
+  processed_count integer := 0;
+  skipped_count integer := 0;
+  locked boolean;
+begin
+  for event_record in
+    select *
+    from public.events
+    where (p_event_id is null or events.id = p_event_id)
+      and events.status = 'live'
+      and events.starts_at is not null
+      and events.ends_at is not null
+      and events.starts_at <= now()
+      and events.ends_at > now()
+      and events.auto_publish_enabled = true
+      and events.queue_paused = false
+      and (events.next_auto_publish_at is null or events.next_auto_publish_at <= now())
+    order by events.starts_at asc, events.id asc
+  loop
+    locked := pg_try_advisory_xact_lock(hashtext('chat-auto-publish:' || event_record.id::text));
+    if not locked then
+      skipped_count := skipped_count + 1;
+      continue;
+    end if;
+
+    v_now := clock_timestamp();
+
+    select chat_messages.*
+    into message_record
+    from public.chat_messages
+    where chat_messages.event_id = event_record.id
+      and chat_messages.status = 'queued'
+      and chat_messages.risk_level = 'low'
+      and chat_messages.auto_publish_eligible = true
+      and chat_messages.is_admin = false
+      and not ('CLASSIFIER_FAILURE' = any(chat_messages.risk_flags))
+      and exists (
+        select 1
+        from public.event_chat_participants
+        where event_chat_participants.id = chat_messages.participant_id
+          and event_chat_participants.event_id = chat_messages.event_id
+      )
+    order by chat_messages.queue_priority desc, chat_messages.queued_at asc, chat_messages.id asc
+    for update skip locked
+    limit 1;
+
+    if message_record.id is null then
+      continue;
+    end if;
+
+    update public.chat_messages
+    set
+      status = 'approved',
+      approved_at = v_now,
+      published_at = v_now,
+      approved_by = null,
+      approval_source = 'queue',
+      queue_attempt_count = queue_attempt_count + 1,
+      last_queue_error = null
+    where id = message_record.id
+      and status = 'queued'
+      and risk_level = 'low'
+      and auto_publish_eligible = true
+    returning * into updated_message;
+
+    if updated_message.id is null then
+      skipped_count := skipped_count + 1;
+      continue;
+    end if;
+
+    update public.events
+    set
+      last_auto_published_at = v_now,
+      next_auto_publish_at = v_now + interval '3 seconds'
+    where id = event_record.id;
+
+    insert into public.chat_message_moderation_audit (
+      event_id,
+      message_id,
+      participant_id,
+      actor_id,
+      action,
+      previous_status,
+      new_status,
+      reason,
+      risk_level,
+      risk_flags,
+      classifier_version
+    )
+    values (
+      updated_message.event_id,
+      updated_message.id,
+      updated_message.participant_id,
+      null,
+      'message_auto_approved',
+      'queued',
+      'approved',
+      'queue',
+      updated_message.risk_level,
+      updated_message.risk_flags,
+      updated_message.classifier_version
+    );
+
+    processed_count := processed_count + 1;
+  end loop;
+
+  return jsonb_build_object('ok', true, 'processed', processed_count, 'skipped', skipped_count);
+exception
+  when others then
+    if message_record.id is not null then
+      update public.chat_messages
+      set
+        queue_attempt_count = queue_attempt_count + 1,
+        last_queue_error = left(sqlerrm, 240)
+      where id = message_record.id
+        and status = 'queued';
+    end if;
+    return jsonb_build_object('ok', false, 'code', 'QUEUE_WORKER_FAILED', 'message', left(sqlerrm, 240));
+end;
+$$;
+
+revoke all on function public.process_chat_auto_publish_queue(uuid) from public;
+grant execute on function public.process_chat_auto_publish_queue(uuid) to authenticated;
+
+select cron.unschedule(jobid)
+from cron.job
+where jobname = 'process-chat-auto-publish-queue';
+
+select cron.schedule(
+  'process-chat-auto-publish-queue',
+  '3 seconds',
+  $$select public.process_chat_auto_publish_queue();$$
+);
+
 -- alter publication supabase_realtime add table public.chat_messages;
 
 notify pgrst, 'reload schema';

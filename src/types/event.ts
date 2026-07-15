@@ -16,6 +16,10 @@ export interface MusicEvent {
   support_url: string | null;
   merch_url: string | null;
   event_url: string | null;
+  auto_publish_enabled: boolean;
+  queue_paused: boolean;
+  next_auto_publish_at: string | null;
+  last_auto_published_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -35,6 +39,10 @@ export type EditableEventFields = Pick<
   | "support_url"
   | "merch_url"
   | "event_url"
+  | "auto_publish_enabled"
+  | "queue_paused"
+  | "next_auto_publish_at"
+  | "last_auto_published_at"
 >;
 
 export type CreateEventInput = Partial<Omit<EditableEventFields, "status">> & {

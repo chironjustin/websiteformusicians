@@ -5,7 +5,7 @@ import { EVENT_NOT_READY_MESSAGE, EventReadinessError, validateEventReadiness, t
 import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
 import { deleteChatMessage, getAdminChatMessages, sendAdminMessage, setMessageHighlighted, setMessagePinned, setMessageStatus, updateMessageFlags } from "@/services/chatService";
-import { createEvent, deleteArchivedEvent, endEvent, getAdminEvents, startEvent, updateEvent } from "@/services/eventService";
+import { createEvent, deleteArchivedEvent, endEvent, getAdminEvents, setEventChatAutoPublishSettings, startEvent, updateEvent } from "@/services/eventService";
 import { assertStoragePathBelongsToEvent, getPublicImageUrl, getSignedAudioUrl, uploadArtistImage, uploadArtwork, uploadAudio, uploadMerchImage, verifyStorageObjectExists } from "@/services/storageService";
 import type { ChatMessage } from "@/types/chat";
 import type { MusicEvent, UpdateEventInput } from "@/types/event";
@@ -49,6 +49,7 @@ type ChatCounts = {
   total: number;
   approved: number;
   pending: number;
+  queued: number;
   rejected: number;
   pinned: number;
   highlighted: number;
@@ -514,7 +515,7 @@ export default function AdminPage() {
         {(["event", "chat", "archive"] as AdminTab[]).map(tab => (
           <button key={tab} type="button" onClick={() => setActiveTab(tab)} style={tabButtonStyle(activeTab === tab)}>
             {tab === "event" && "Event"}
-            {tab === "chat" && `Chat${chat.grouped.pending.length > 0 ? ` (${chat.grouped.pending.length})` : ""}`}
+            {tab === "chat" && `Chat${chat.grouped.pending.length + chat.grouped.queued.length > 0 ? ` (${chat.grouped.pending.length + chat.grouped.queued.length})` : ""}`}
             {tab === "archive" && `Archived Events${archivedEvents.length > 0 ? ` (${archivedEvents.length})` : ""}`}
           </button>
         ))}
@@ -627,6 +628,10 @@ export default function AdminPage() {
           setMessage={setMessage}
           error={error}
           message={message}
+          onEventUpdated={saved => {
+            setEvent(saved);
+            setEvents(current => upsertEvent(current, saved));
+          }}
         />
       ) : (
         <ArchivedEventsPanel
@@ -700,6 +705,7 @@ function countMessages(messages: ChatMessage[] = []): ChatCounts {
     total: counts.total + 1,
     approved: counts.approved + (message.status === "approved" ? 1 : 0),
     pending: counts.pending + (message.status === "pending" ? 1 : 0),
+    queued: counts.queued + (message.status === "queued" ? 1 : 0),
     rejected: counts.rejected + (message.status === "rejected" ? 1 : 0),
     pinned: counts.pinned + (message.is_pinned ? 1 : 0),
     highlighted: counts.highlighted + (message.is_highlighted ? 1 : 0),
@@ -708,11 +714,23 @@ function countMessages(messages: ChatMessage[] = []): ChatCounts {
     total: 0,
     approved: 0,
     pending: 0,
+    queued: 0,
     rejected: 0,
     pinned: 0,
     highlighted: 0,
     admin: 0,
   });
+}
+
+function formatQueuedAge(messages: ChatMessage[]) {
+  const queuedTimes = messages
+    .map(message => message.queued_at ? new Date(message.queued_at).getTime() : 0)
+    .filter(time => time > 0);
+  if (queuedTimes.length === 0) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - Math.min(...queuedTimes)) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
 }
 
 function getTrustedEventMessages(event: MusicEvent, messages: ChatMessage[] = []) {
@@ -873,7 +891,7 @@ function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDe
                       <strong style={{ fontSize: 13, color: "#111827", overflowWrap: "anywhere" }}>{archiveEvent.title}</strong>
                       <span style={{ fontSize: 12, color: "#6b7280" }}>{archiveEvent.artist_name || "Unknown artist"}</span>
                       <span style={{ fontSize: 11, color: "#6b7280" }}>{formatAdminDateTime(archiveEvent.starts_at ?? "")} - {formatAdminDateTime(archiveEvent.ends_at ?? "")}</span>
-                      <span style={{ fontSize: 11, color: "#374151" }}>{archiveEvent.status} · {counts.total} messages · {counts.approved} approved · {counts.pending + counts.rejected} pending/rejected</span>
+                      <span style={{ fontSize: 11, color: "#374151" }}>{archiveEvent.status} · {counts.total} messages · {counts.approved} approved · {counts.pending + counts.queued + counts.rejected} pending/queued/rejected</span>
                     </span>
                   </button>
                   <button
@@ -904,7 +922,7 @@ function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDe
               <p style={{ margin: 0, color: "#374151", fontSize: 13 }}>Status: {selectedEvent.status}</p>
               <p style={{ margin: 0, color: "#374151", fontSize: 13 }}>Audio: {selectedEvent.audio_path ? selectedEvent.audio_path.split("/").pop() : "No audio uploaded"}</p>
               <p style={{ margin: 0, color: "#374151", fontSize: 13 }}>
-                {selectedCounts.total} total · {selectedCounts.approved} approved · {selectedCounts.pending} pending · {selectedCounts.rejected} rejected · {selectedCounts.pinned} pinned · {selectedCounts.highlighted} highlighted · {selectedCounts.admin} admin
+                {selectedCounts.total} total · {selectedCounts.approved} approved · {selectedCounts.pending} pending · {selectedCounts.queued} queued · {selectedCounts.rejected} rejected · {selectedCounts.pinned} pinned · {selectedCounts.highlighted} highlighted · {selectedCounts.admin} admin
               </p>
             </div>
           </div>
@@ -922,6 +940,7 @@ function ArchivedEventsPanel({ events, onDeleted }: { events: MusicEvent[]; onDe
             <>
               <ArchiveMessageSection event={selectedEvent} title="Approved" messages={selectedMessages.filter(message => message.status === "approved")} />
               <ArchiveMessageSection event={selectedEvent} title="Pending" messages={selectedMessages.filter(message => message.status === "pending")} />
+              <ArchiveMessageSection event={selectedEvent} title="Queued" messages={selectedMessages.filter(message => message.status === "queued")} />
               <ArchiveMessageSection event={selectedEvent} title="Rejected" messages={selectedMessages.filter(message => message.status === "rejected")} />
               <ArchiveMessageSection event={selectedEvent} title="Pinned" messages={selectedMessages.filter(message => message.is_pinned)} />
               <ArchiveMessageSection event={selectedEvent} title="Highlighted" messages={selectedMessages.filter(message => message.is_highlighted)} />
@@ -1081,6 +1100,7 @@ function ChatModerationPanel({
   setMessage,
   error,
   message,
+  onEventUpdated,
 }: {
   event: MusicEvent | null;
   chat: ReturnType<typeof useEventChat>;
@@ -1090,8 +1110,11 @@ function ChatModerationPanel({
   setMessage: (message: string) => void;
   error: string;
   message: string;
+  onEventUpdated: (event: MusicEvent) => void;
 }) {
   const [body, setBody] = useState("");
+  const queuedCount = chat.grouped.queued.length;
+  const oldestQueuedAge = formatQueuedAge(chat.grouped.queued);
 
   async function run(label: string, action: () => Promise<void>) {
     setBusy(true);
@@ -1117,6 +1140,22 @@ function ChatModerationPanel({
     });
   }
 
+  async function setAutoPublish(enabled: boolean) {
+    await run(enabled ? "Auto publish enabled." : "Auto publish disabled.", async () => {
+      if (!event) throw new Error("Start an active event before changing auto-publish settings.");
+      const saved = await setEventChatAutoPublishSettings(event.id, { auto_publish_enabled: enabled });
+      onEventUpdated(saved);
+    });
+  }
+
+  async function setQueuePaused(paused: boolean) {
+    await run(paused ? "Queue paused." : "Queue resumed.", async () => {
+      if (!event) throw new Error("Start an active event before changing queue settings.");
+      const saved = await setEventChatAutoPublishSettings(event.id, { queue_paused: paused });
+      onEventUpdated(saved);
+    });
+  }
+
   return (
     <div style={{ padding: 24, maxWidth: 760, display: "flex", flexDirection: "column", gap: 20 }}>
       <Panel title="Composer">
@@ -1138,6 +1177,18 @@ function ChatModerationPanel({
         {error && <p style={{ ...noteStyle, color: "#b91c1c" }}>{error}</p>}
       </Panel>
 
+      <Panel title="Auto Publish Queue">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <SmallButton disabled={busy || !event || event.auto_publish_enabled} onClick={() => setAutoPublish(true)}>Auto Publish On</SmallButton>
+          <SmallButton disabled={busy || !event || !event.auto_publish_enabled} color="#6b7280" onClick={() => setAutoPublish(false)}>Auto Publish Off</SmallButton>
+          <SmallButton disabled={busy || !event || event.queue_paused} color="#f59e0b" onClick={() => setQueuePaused(true)}>Pause Queue</SmallButton>
+          <SmallButton disabled={busy || !event || !event.queue_paused} onClick={() => setQueuePaused(false)}>Resume Queue</SmallButton>
+        </div>
+        <p style={noteStyle}>
+          {event?.auto_publish_enabled ? "Auto publish is on" : "Auto publish is off"} · {event?.queue_paused ? "paused" : "not paused"} · {queuedCount} queued{oldestQueuedAge ? ` · oldest ${oldestQueuedAge}` : ""}
+        </p>
+      </Panel>
+
       <ChatPreview messages={chat.grouped.approved} busy={busy} run={run} />
 
       <ChatSection title="Pending moderation queue" empty="No pending messages." messages={chat.grouped.pending}>
@@ -1146,6 +1197,16 @@ function ChatModerationPanel({
             <SmallButton disabled={busy} onClick={() => run("Message approved.", () => setMessageStatus(messageItem.id, "approved").then(() => undefined))}>Approve</SmallButton>
             <SmallButton disabled={busy} color="#ef4444" onClick={() => run("Message rejected.", () => setMessageStatus(messageItem.id, "rejected").then(() => undefined))}>Reject</SmallButton>
             <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(messageItem.id))}>Delete</SmallButton>
+          </>
+        )}
+      </ChatSection>
+
+      <ChatSection title="Auto-publish queue" empty="No queued low-risk messages." messages={chat.grouped.queued}>
+        {messageItem => (
+          <>
+            <SmallButton disabled={busy} onClick={() => run("Queued message approved.", () => setMessageStatus(messageItem.id, "approved").then(() => undefined))}>Approve Now</SmallButton>
+            <SmallButton disabled={busy} color="#ef4444" onClick={() => run("Queued message rejected.", () => setMessageStatus(messageItem.id, "rejected").then(() => undefined))}>Reject</SmallButton>
+            <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Queued message deleted.", () => deleteChatMessage(messageItem.id))}>Delete</SmallButton>
           </>
         )}
       </ChatSection>
