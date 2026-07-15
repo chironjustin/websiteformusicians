@@ -119,11 +119,72 @@ function GlobalStyles() {
     .public-event-shell input, .public-event-shell textarea { cursor: text !important; }
     .public-event-shell ::-webkit-scrollbar { display: none; }
     .public-event-shell * { scrollbar-width: none; }
+    .live-event-view {
+      position: relative;
+      min-height: 100vh;
+      background: ${BG};
+      overflow: hidden;
+      padding: 2.2rem 1.75rem 1.25rem;
+    }
+    .live-event-content {
+      position: relative;
+      z-index: 10;
+      height: calc(100vh - 3.5rem);
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .live-chat-layout {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .live-chat-layout--joined {
+      display: flex;
+      flex-direction: column;
+    }
+    .live-chat-stream--prejoin {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 8.1rem;
+      bottom: 17rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      z-index: 3;
+    }
+    .live-chat-stream--joined {
+      position: relative;
+      z-index: 3;
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .live-chat__header {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(0,255,65,0.15);
+      padding: 1.25rem 0 0.7rem;
+      margin-bottom: 0.5rem;
+    }
+    .live-chat__messages {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      padding: 0.25rem 0 0.75rem;
+    }
     .chat-composer {
-      position: fixed;
-      left: clamp(0.85rem, 4vw, 1.75rem);
-      right: clamp(0.85rem, 4vw, 1.75rem);
-      bottom: 0;
+      flex: 0 0 auto;
       padding-bottom: calc(max(1rem, env(safe-area-inset-bottom)) + 0.75rem);
       z-index: 30;
       pointer-events: auto;
@@ -149,13 +210,20 @@ function GlobalStyles() {
       overflow-wrap: anywhere;
     }
     @supports (min-height: 100dvh) {
-      .public-event-shell {
+      .public-event-shell,
+      .live-event-view {
         min-height: 100dvh;
+      }
+      .live-event-content {
+        height: calc(100dvh - 3.5rem);
       }
     }
     @media (max-width: 640px) {
+      .live-event-view {
+        padding: 2rem 1.35rem 0;
+      }
       .chat-composer {
-        padding-bottom: calc(max(4.75rem, env(safe-area-inset-bottom)) + 0.75rem);
+        padding-bottom: calc(max(1rem, env(safe-area-inset-bottom)) + 0.75rem);
       }
       .chat-composer__form {
         gap: 0.42rem;
@@ -1565,23 +1633,27 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
     });
   }, [audioPipelineDiagnostics.audioPathPresent, audioPipelineDiagnostics.finalAudioUrlPresent, audioPipelineDiagnostics.signingRequest, audioPipelineDiagnostics.sourceIdentity, eventId, joinedIdentity]);
 
+  const joined = Boolean(joinedIdentity);
+
   return (
-    <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", padding: "2.2rem 1.75rem 1.25rem" }}>
-      <div style={{ position: "relative", zIndex: 10, minHeight: "calc(100vh - 3.5rem)", display: "flex", flexDirection: "column" }}>
+    <div className="live-event-view">
+      <div className="live-event-content">
         <LiveAudioHeader title={title} audioUrl={audioUrl} audioSourceStatus={audioSourceStatus} audioPipelineDiagnostics={audioPipelineDiagnostics} startsAt={startsAt} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
-        <LiveMessageStream messages={messages} joined={Boolean(joinedIdentity)} eventId={eventId} artistName={artistName} artistUrl={artistUrl} />
-        <BouncingArtistPortrait imageUrl={artistUrl} />
-        {starting && (
-          <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
-            event is starting...
-          </p>
-        )}
-        {joinedIdentity ? (
-          <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} />
-        ) : (
-          <JoinChatPanel eventId={eventId} onJoin={setJoinedIdentity} />
-        )}
+        <div className={`live-chat-layout ${joined ? "live-chat-layout--joined" : "live-chat-layout--prejoin"}`}>
+          <LiveMessageStream messages={messages} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} />
+          <BouncingArtistPortrait imageUrl={artistUrl} />
+          {starting && (
+            <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
+              event is starting...
+            </p>
+          )}
+          {joinedIdentity ? (
+            <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} />
+          ) : (
+            <JoinChatPanel eventId={eventId} onJoin={setJoinedIdentity} />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1604,35 +1676,79 @@ function LiveAudioHeader({ title, audioUrl, audioSourceStatus, audioPipelineDiag
 function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistName: string; artistUrl: string }) {
   const pinnedMessage = messages.find(message => message.is_pinned);
   const feedMessages = pinnedMessage ? messages.filter(message => message.id !== pinnedMessage.id) : messages;
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
+  const wasNearBottomRef = useRef(true);
+  const didInitialScrollRef = useRef(false);
+  const latestMessageId = messages[messages.length - 1]?.id ?? "";
+
+  useEffect(() => {
+    didInitialScrollRef.current = false;
+    wasNearBottomRef.current = true;
+  }, [eventId]);
+
+  useEffect(() => {
+    if (!joined) return;
+
+    const viewport = viewportRef.current;
+    const bottomAnchor = bottomAnchorRef.current;
+    if (!viewport || !bottomAnchor) return;
+
+    const shouldScroll = !didInitialScrollRef.current || wasNearBottomRef.current;
+    const behavior: ScrollBehavior = didInitialScrollRef.current ? "smooth" : "auto";
+    if (!shouldScroll) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (behavior === "auto") {
+        viewport.scrollTop = viewport.scrollHeight;
+      } else {
+        bottomAnchor.scrollIntoView({ block: "end", behavior });
+      }
+      didInitialScrollRef.current = true;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [joined, latestMessageId, messages.length]);
+
+  function updateNearBottom() {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    wasNearBottomRef.current = distanceFromBottom < 80;
+  }
+
+  if (!joined) {
+    return (
+      <section className="live-chat-stream--prejoin" style={{ opacity: messages.length > 0 ? 1 : 0.28 }}>
+        {pinnedMessage && (
+          <div style={{ width: "min(100%, 620px)" }}>
+            <ChatMessageBubble message={pinnedMessage} joined={joined} artistName={artistName} artistUrl={artistUrl} pinnedArea />
+          </div>
+        )}
+        {feedMessages.map(message => (
+          <ChatMessageBubble key={message.id} message={message} joined={joined} artistName={artistName} artistUrl={artistUrl} />
+        ))}
+      </section>
+    );
+  }
 
   return (
-    <section style={{
-      position: "absolute",
-      left: 0,
-      right: 0,
-      top: joined ? "5.6rem" : "8.1rem",
-      bottom: joined ? "5.75rem" : "17rem",
-      overflowY: "auto",
-      display: "flex",
-      flexDirection: "column",
-      gap: "0.75rem",
-      opacity: messages.length > 0 ? 1 : joined ? 0.9 : 0.28,
-      zIndex: 3,
-    }}>
-      {pinnedMessage && (
-        <div style={{ width: "min(100%, 620px)" }}>
-          <ChatMessageBubble message={pinnedMessage} joined={joined} artistName={artistName} artistUrl={artistUrl} pinnedArea />
-        </div>
-      )}
-      {joined && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(0,255,65,0.15)", paddingBottom: "0.7rem", marginBottom: "0.5rem" }}>
-          <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.45rem", letterSpacing: "0.22em" }}>live chat</p>
-          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.4)", fontSize: "1.05rem", letterSpacing: "0.1em" }}>{messages.length} msgs</p>
-        </div>
-      )}
-      {feedMessages.map(message => (
-        <ChatMessageBubble key={message.id} message={message} joined={joined} artistName={artistName} artistUrl={artistUrl} />
-      ))}
+    <section className="live-chat-stream--joined" style={{ opacity: messages.length > 0 ? 1 : 0.9 }}>
+      <div className="live-chat__header">
+        <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.45rem", letterSpacing: "0.22em" }}>live chat</p>
+        <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.4)", fontSize: "1.05rem", letterSpacing: "0.1em" }}>{messages.length} msgs</p>
+      </div>
+      <div ref={viewportRef} className="live-chat__messages" onScroll={updateNearBottom}>
+        {pinnedMessage && (
+          <div style={{ width: "min(100%, 620px)" }}>
+            <ChatMessageBubble message={pinnedMessage} joined={joined} artistName={artistName} artistUrl={artistUrl} pinnedArea />
+          </div>
+        )}
+        {feedMessages.map(message => (
+          <ChatMessageBubble key={message.id} message={message} joined={joined} artistName={artistName} artistUrl={artistUrl} />
+        ))}
+        <div ref={bottomAnchorRef} aria-hidden="true" style={{ height: 1, flexShrink: 0 }} />
+      </div>
     </section>
   );
 }
