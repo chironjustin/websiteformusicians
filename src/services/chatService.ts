@@ -4,9 +4,34 @@ import type { ChatMessage, ChatMessageStatus, ChatParticipant, CreateAdminChatMe
 const CHAT_SESSION_KEY = "music-event-chat-session-id";
 const MAX_ADMIN_DISPLAY_NAME = 50;
 const MAX_BODY = 500;
+const MAX_VISITOR_BODY = 400;
+
+export class ChatSubmissionError extends Error {
+  code: string;
+  retryAfterSeconds: number | null;
+
+  constructor(code: string, message: string, retryAfterSeconds: number | null = null) {
+    super(message);
+    this.name = "ChatSubmissionError";
+    this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+type SubmitChatMessageResult =
+  | { ok: true; message: ChatMessage; duplicate?: boolean }
+  | { ok: false; code?: string; message?: string; retryAfterSeconds?: number };
 
 function cleanText(value: string, maxLength: number) {
   return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function normalizeMessageText(value: string) {
+  return value.trim();
+}
+
+function unicodeLength(value: string) {
+  return Array.from(value).length;
 }
 
 function assertBody(body: string) {
@@ -55,9 +80,12 @@ export async function getAdminChatMessages(eventId: string) {
 
 export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
   assertEventId(input.event_id);
-  const body = cleanText(input.body, MAX_BODY);
+  const body = normalizeMessageText(input.body);
   const clientToken = input.client_token ?? crypto.randomUUID();
-  assertBody(body);
+  if (!body) throw new ChatSubmissionError("MESSAGE_EMPTY", "Message cannot be empty.");
+  if (unicodeLength(body) > MAX_VISITOR_BODY) {
+    throw new ChatSubmissionError("MESSAGE_TOO_LONG", "Message must be 400 characters or fewer.");
+  }
   if (!input.participant_id) throw new Error("A reserved chat identity is required.");
 
   const { data, error } = await supabase.rpc("submit_chat_message", {
@@ -68,7 +96,16 @@ export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
   });
 
   if (error) throw new Error(error.message);
-  return data as ChatMessage;
+  const result = data as SubmitChatMessageResult | null;
+  if (!result) throw new Error("Message could not be submitted.");
+  if (!result.ok) {
+    throw new ChatSubmissionError(
+      result.code ?? "MESSAGE_SUBMISSION_FAILED",
+      result.message ?? "Message could not be submitted.",
+      typeof result.retryAfterSeconds === "number" ? result.retryAfterSeconds : null,
+    );
+  }
+  return result.message;
 }
 
 export async function joinEventChatIdentity(input: { event_id: string; session_id?: string }) {

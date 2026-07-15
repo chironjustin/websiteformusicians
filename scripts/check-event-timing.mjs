@@ -104,8 +104,11 @@ assert(publicPage.includes("function LiveMessageStream"), "Approved messages mus
 assert(!publicPage.includes("joined || message.is_admin"), "Pre-join approved messages must not use alternate hidden message markup.");
 assert(!publicPage.includes("ChatAvatar") && !publicPage.includes("ArtistMessageAvatar") && !publicPage.includes("createRetroAvatar"), "Public chat messages and composer must not render generated identity avatars.");
 assert(!publicPage.includes("avatarId") && !publicPage.includes("CHAT_AVATAR_KEY_PREFIX"), "Stored generated chat identities must not include avatar metadata.");
-assert(publicPage.includes("pendingSubmission") && publicPage.includes("Waiting..."), "Submitted visitor messages must show Waiting while the tracked row is pending.");
-assert(publicPage.includes("getVisitorMessageStatus(eventId, pendingSubmission.id, pendingSubmission.clientToken)"), "Waiting state must check the submitted message status by event id, row id, and client token.");
+assert(publicPage.includes("VISITOR_MESSAGE_LIMIT = 400") && publicPage.includes("getUnicodeLength(body.trim())"), "Visitor composer must count trimmed Unicode characters against the 400-character limit.");
+assert(publicPage.includes("pendingSubmissions") && publicPage.includes("Waiting..."), "Submitted visitor messages must show Waiting while tracked rows are pending.");
+assert(publicPage.includes("pendingSubmissions.map") && publicPage.includes("getVisitorMessageStatus(eventId, submission.id, submission.clientToken)"), "Waiting state must independently check each submitted message status by event id, row id, and client token.");
+assert(!publicPage.includes("pendingSubmission)") && !publicPage.includes("8_000") && !publicPage.includes("lastSentAt"), "Visitor composer must not block new sends merely because another message is pending or because of a fixed local cooldown.");
+assert(publicPage.includes("cooldownRemaining") && publicPage.includes("Wait a little till sending again.") && publicPage.includes("formatCooldown"), "Visitor composer must show a server-provided cooldown countdown.");
 assert(publicPage.includes('live={authoritativeState === "live"}'), "Public chat submission must depend on authoritative database live status.");
 
 const chatHook = readFileSync("src/hooks/useEventChat.ts", "utf8");
@@ -115,6 +118,8 @@ assert(chatHook.includes("filter: `event_id=eq.${eventId}`"), "Realtime chat sub
 const chatService = readFileSync("src/services/chatService.ts", "utf8");
 assert(chatService.includes('.eq("event_id", eventId)') && chatService.includes('.eq("status", "approved")'), "Public chat query must fetch approved messages for the active event only.");
 assert(chatService.includes('supabase.rpc("submit_chat_message"') && chatService.includes("p_client_token") && chatService.includes("get_visitor_chat_message_status"), "Visitor submissions must use the scoped public RPC and pending-status lookup.");
+assert(chatService.includes("ChatSubmissionError") && chatService.includes("retryAfterSeconds") && chatService.includes("result.code") && chatService.includes("result.message"), "Visitor submission service must map structured server errors, including rate-limit metadata.");
+assert(chatService.includes("MAX_VISITOR_BODY = 400") && chatService.includes("unicodeLength(body) > MAX_VISITOR_BODY") && !chatService.includes("normalizeMessageText(input.body).slice"), "Visitor submission service must validate but never silently truncate 400-character messages.");
 assert(chatService.includes("joinEventChatIdentity") && chatService.includes("getOrCreateChatSessionId") && chatService.includes('supabase.rpc("join_event_chat"'), "Visitor chat names must use one-click event-scoped server-generated identity creation.");
 assert(chatService.includes("Array.isArray(data) ? data[0] : data") && chatService.includes("invalid_identity_response"), "Generated identity RPC responses must unwrap the single table-return row before joining chat.");
 assert(!chatService.includes("reserve_event_chat_identity") && !chatService.includes("p_display_name") && !chatService.includes("p_normalized_name"), "The client must not call the old manual identity reservation RPC or submit generated name fields.");
@@ -128,6 +133,7 @@ assert(publicLivePage.includes("live ends {label}"), "Live header must show the 
 const chatSchema = readFileSync("supabase/chat-schema.sql", "utf8");
 assert(chatSchema.includes("event_id uuid references public.events") && chatSchema.includes("client_token uuid"), "Chat schema must associate messages with events and pending-status client tokens.");
 assert(chatSchema.includes("chat_messages_event_status_created_idx") && chatSchema.includes("chat_messages_event_client_token_idx"), "Chat schema must include event-scoped retrieval indexes.");
+assert(chatSchema.includes("chat_messages_event_participant_client_token_idx"), "Chat schema must enforce idempotent visitor submissions by event, participant, and client token.");
 assert(chatSchema.includes("create or replace function public.submit_chat_message"), "Chat schema must provide a public pending-message submit RPC.");
 assert(chatSchema.includes("create table if not exists public.event_chat_participants") && chatSchema.includes("event_chat_participants_event_normalized_name_idx"), "Chat schema must enforce event-scoped temporary username uniqueness.");
 assert(chatSchema.includes("session_id uuid") && chatSchema.includes("event_chat_participants_event_session_idx"), "Chat schema must preserve generated chat identity by event and session.");
@@ -138,6 +144,12 @@ assert(chatSchema.includes("should_reassign_existing") && chatSchema.includes("r
 assert(chatSchema.includes("revoke select, insert, update, delete on public.event_chat_participants from anon, authenticated"), "Participant identity rows must not be directly enumerable by public clients.");
 assert(chatSchema.includes("returns table") && !chatSchema.includes("p_avatar_id text") && !chatSchema.includes("avatar :="), "Generated identity RPC must return only identity fields and must not accept or assign avatars.");
 assert(chatSchema.includes("revoke insert on public.chat_messages from anon"), "Anonymous visitors must not rely on fragile direct table inserts.");
+assert(chatSchema.includes("returns jsonb") && chatSchema.includes("MESSAGE_RATE_LIMITED") && chatSchema.includes("retryAfterSeconds"), "Visitor submit RPC must return structured JSON errors including rate-limit metadata.");
+assert(chatSchema.includes("char_length(btrim(body)) between 1 and 400") && chatSchema.includes("char_length(normalized_body) > 400"), "Visitor submit path must enforce the 400-character trimmed body limit in schema and RPC.");
+assert(chatSchema.includes("coalesce(p_body, '') ~ '[[:cntrl:]]'") && chatSchema.includes("MESSAGE_INVALID_CHARACTERS"), "Visitor submit RPC must reject prohibited control characters.");
+assert(chatSchema.includes("pg_advisory_xact_lock(hashtext(p_event_id::text || ':' || p_participant_id::text))"), "Visitor submit RPC must lock per event and participant before idempotency/rate-limit checks.");
+assert(chatSchema.includes("created_at > now() - interval '2 minutes'") && chatSchema.includes("recent_count >= 3"), "Visitor submit RPC must enforce three accepted submissions per rolling two-minute window.");
+assert(chatSchema.includes("MESSAGE_ALREADY_SUBMITTED") && chatSchema.includes("'duplicate', true"), "Visitor submit RPC must handle duplicate client_token retries idempotently.");
 assert(chatSchema.includes("events.starts_at <= now()") && chatSchema.includes("events.ends_at > now()"), "Visitor submit RPC must require the active live timestamp window.");
 assert(chatSchema.includes("user_id") && chatSchema.includes("is_admin") && chatSchema.includes("is_pinned") && chatSchema.includes("is_highlighted") && chatSchema.includes("is_liked"), "Visitor submit RPC must force non-privileged pending messages.");
 assert(chatSchema.includes("Authenticated admins can read unassigned legacy chat messages"), "Chat schema must allow legacy unassigned messages to be reviewed separately.");

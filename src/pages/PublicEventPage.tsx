@@ -3,6 +3,7 @@ import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemaining
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
 import {
+  ChatSubmissionError,
   joinEventChatIdentity,
   sendVisitorMessage,
   getVisitorMessageStatus,
@@ -1679,34 +1680,69 @@ function JoinChatPanel({ eventId, onJoin }: { eventId: string; onJoin: (identity
   );
 }
 
+const VISITOR_MESSAGE_LIMIT = 400;
+
+function getUnicodeLength(value: string) {
+  return Array.from(value).length;
+}
+
+function formatCooldown(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}:${remainder.toString().padStart(2, "0")}`;
+}
+
 function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: string; identity: JoinedChatIdentity; live: boolean; starting: boolean }) {
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
-  const [pendingSubmission, setPendingSubmission] = useState<{ id: string; clientToken: string } | null>(null);
-  const [lastSentAt, setLastSentAt] = useState(0);
+  const [pendingSubmissions, setPendingSubmissions] = useState<Array<{ id: string; clientToken: string }>>([]);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
   useEffect(() => {
     setBody("");
     setError("");
     setSending(false);
-    setPendingSubmission(null);
+    setPendingSubmissions([]);
+    setCooldownUntil(0);
+    setCooldownRemaining(0);
   }, [eventId]);
 
   useEffect(() => {
-    if (!pendingSubmission) return;
+    if (cooldownUntil <= Date.now()) {
+      setCooldownRemaining(0);
+      return;
+    }
+
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+      setCooldownRemaining(remaining);
+      if (remaining === 0) setCooldownUntil(0);
+    };
+
+    update();
+    const id = window.setInterval(update, 1000);
+    return () => window.clearInterval(id);
+  }, [cooldownUntil]);
+
+  useEffect(() => {
+    if (pendingSubmissions.length === 0) return;
 
     let active = true;
     const checkStatus = async () => {
-      try {
-        const status = await getVisitorMessageStatus(eventId, pendingSubmission.id, pendingSubmission.clientToken);
-        if (!active) return;
-        if (status !== "pending") {
-          setPendingSubmission(null);
-        }
-      } catch {
-        if (active) setPendingSubmission(null);
-      }
+      const results = await Promise.allSettled(
+        pendingSubmissions.map(async submission => {
+          const status = await getVisitorMessageStatus(eventId, submission.id, submission.clientToken);
+          return { submission, status };
+        }),
+      );
+      if (!active) return;
+
+      setPendingSubmissions(current => current.filter(submission => {
+        const result = results.find(item => item.status === "fulfilled" && item.value.submission.clientToken === submission.clientToken);
+        return !result || (result.status === "fulfilled" && result.value.status === "pending");
+      }));
     };
 
     checkStatus();
@@ -1715,15 +1751,20 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
       active = false;
       window.clearInterval(id);
     };
-  }, [eventId, pendingSubmission]);
+  }, [eventId, pendingSubmissions]);
 
   async function submitMessage(event: React.FormEvent) {
     event.preventDefault();
-    if (!live || sending || pendingSubmission) return;
+    const trimmedBody = body.trim();
+    const trimmedLength = getUnicodeLength(trimmedBody);
 
-    const sentAt = Date.now();
-    if (sentAt - lastSentAt < 8_000) {
-      setError("wait a few seconds before sending another message.");
+    if (!live || sending || cooldownRemaining > 0) return;
+    if (!trimmedBody) {
+      setError("Message cannot be empty.");
+      return;
+    }
+    if (trimmedLength > VISITOR_MESSAGE_LIMIT) {
+      setError("Message must be 400 characters or fewer.");
       return;
     }
 
@@ -1738,17 +1779,28 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
         client_token: clientToken,
       });
       setBody("");
-      setLastSentAt(sentAt);
-      setPendingSubmission({ id: message.id, clientToken });
+      setPendingSubmissions(current => current.some(submission => submission.id === message.id)
+        ? current
+        : [...current, { id: message.id, clientToken }]);
     } catch (err) {
       console.error("Visitor chat submission failed", err);
-      setError("message could not be submitted.");
+      if (err instanceof ChatSubmissionError && err.code === "MESSAGE_RATE_LIMITED" && err.retryAfterSeconds) {
+        setCooldownUntil(Date.now() + err.retryAfterSeconds * 1000);
+        setCooldownRemaining(err.retryAfterSeconds);
+        setError("Wait a little till sending again.");
+      } else if (err instanceof ChatSubmissionError) {
+        setError(err.message);
+      } else {
+        setError("message could not be submitted.");
+      }
     } finally {
       setSending(false);
     }
   }
 
-  const canSend = live && !sending && !pendingSubmission && Boolean(body.trim());
+  const trimmedLength = getUnicodeLength(body.trim());
+  const isTooLong = trimmedLength > VISITOR_MESSAGE_LIMIT;
+  const canSend = live && !sending && cooldownRemaining === 0 && Boolean(body.trim()) && !isTooLong;
 
   return (
     <div style={{ position: "fixed", left: "clamp(0.85rem, 4vw, 1.75rem)", right: "clamp(0.85rem, 4vw, 1.75rem)", bottom: "max(1.2rem, env(safe-area-inset-bottom))", zIndex: 20 }}>
@@ -1757,10 +1809,14 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", borderTop: "1px solid rgba(0,255,65,0.1)", paddingTop: "0.7rem" }}>
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.05rem", letterSpacing: "0.06em", maxWidth: "min(26vw, 140px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{identity.displayName}</span>
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
-            <input value={body} onChange={event => setBody(event.target.value)} disabled={Boolean(pendingSubmission)} maxLength={500} aria-label="Message" style={{ ...terminalInputStyle, fontSize: "1.05rem" }} />
+            <input value={body} onChange={event => setBody(event.target.value)} aria-label="Message" style={{ ...terminalInputStyle, fontSize: "1.05rem" }} />
             <button disabled={!canSend} style={sendButtonStyle(canSend)}>send</button>
           </div>
-          {pendingSubmission && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>Waiting...</p>}
+          <p style={{ fontFamily: VT, color: isTooLong ? "#ff5c5c" : "rgba(0,255,65,0.55)", fontSize: "0.85rem", textAlign: "right" }}>
+            {trimmedLength} / {VISITOR_MESSAGE_LIMIT}
+          </p>
+          {pendingSubmissions.length > 0 && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>Waiting...</p>}
+          {cooldownRemaining > 0 && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>Wait a little till sending again. {formatCooldown(cooldownRemaining)}</p>}
           {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem" }}>{error}</p>}
         </form>
       ) : (
