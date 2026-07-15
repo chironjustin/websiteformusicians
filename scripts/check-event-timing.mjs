@@ -105,11 +105,12 @@ assert(!publicPage.includes("joined || message.is_admin"), "Pre-join approved me
 assert(!publicPage.includes("ChatAvatar") && !publicPage.includes("ArtistMessageAvatar") && !publicPage.includes("createRetroAvatar"), "Public chat messages and composer must not render generated identity avatars.");
 assert(!publicPage.includes("avatarId") && !publicPage.includes("CHAT_AVATAR_KEY_PREFIX"), "Stored generated chat identities must not include avatar metadata.");
 assert(publicPage.includes("VISITOR_MESSAGE_LIMIT = 400") && publicPage.includes("getUnicodeLength(body.trim())"), "Visitor composer must count trimmed Unicode characters against the 400-character limit.");
+assert(!publicPage.includes("{trimmedLength} / {VISITOR_MESSAGE_LIMIT}"), "Visitor composer must not render a public character counter.");
 assert(publicPage.includes("pendingSubmissions") && publicPage.includes("Waiting..."), "Submitted visitor messages must show Waiting while tracked rows are pending.");
 assert(publicPage.includes("pendingSubmissions.map") && publicPage.includes("getVisitorMessageStatus(eventId, submission.id, submission.clientToken)"), "Waiting state must independently check each submitted message status by event id, row id, and client token.");
 assert(!publicPage.includes("pendingSubmission)") && !publicPage.includes("8_000") && !publicPage.includes("lastSentAt"), "Visitor composer must not block new sends merely because another message is pending or because of a fixed local cooldown.");
 assert(publicPage.includes("cooldownRemaining") && publicPage.includes("RATE_LIMIT_MESSAGE") && !publicPage.includes("formatCooldown"), "Visitor composer must keep server-provided cooldown state without rendering a public countdown.");
-assert(publicPage.includes("feedbackMessage = error ||") && publicPage.includes('role={feedbackTone === "error" ? "alert" : "status"}'), "Visitor composer must render exactly one prioritized feedback notice.");
+assert(publicPage.includes("feedbackMessage = error ||") && publicPage.includes('className="chat-composer__feedback"') && publicPage.includes('role={feedbackMessage ? feedbackTone === "error" ? "alert" : "status" : undefined}'), "Visitor composer must render exactly one prioritized feedback notice in the shared feedback row.");
 assert(publicPage.includes('live={authoritativeState === "live"}'), "Public chat submission must depend on authoritative database live status.");
 
 const chatHook = readFileSync("src/hooks/useEventChat.ts", "utf8");

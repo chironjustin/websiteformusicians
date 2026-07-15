@@ -119,6 +119,54 @@ function GlobalStyles() {
     .public-event-shell input, .public-event-shell textarea { cursor: text !important; }
     .public-event-shell ::-webkit-scrollbar { display: none; }
     .public-event-shell * { scrollbar-width: none; }
+    .chat-composer {
+      position: fixed;
+      left: clamp(0.85rem, 4vw, 1.75rem);
+      right: clamp(0.85rem, 4vw, 1.75rem);
+      bottom: 0;
+      padding-bottom: calc(max(1rem, env(safe-area-inset-bottom)) + 0.75rem);
+      z-index: 30;
+      pointer-events: auto;
+    }
+    .chat-composer__form {
+      display: grid;
+      gap: 0.5rem;
+    }
+    .chat-composer__controls {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-top: 1px solid rgba(0,255,65,0.1);
+      padding-top: 0.7rem;
+      min-width: 0;
+    }
+    .chat-composer__feedback {
+      min-height: 1.15rem;
+      margin: 0;
+      font-family: ${VT};
+      font-size: 0.95rem;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+    @supports (min-height: 100dvh) {
+      .public-event-shell {
+        min-height: 100dvh;
+      }
+    }
+    @media (max-width: 640px) {
+      .chat-composer {
+        padding-bottom: calc(max(4.75rem, env(safe-area-inset-bottom)) + 0.75rem);
+      }
+      .chat-composer__form {
+        gap: 0.42rem;
+      }
+      .chat-composer__controls {
+        gap: 0.42rem;
+      }
+      .chat-composer__feedback {
+        min-height: 1.35rem;
+      }
+    }
   `;
   return <style dangerouslySetInnerHTML={{ __html: css }} />;
 }
@@ -1803,23 +1851,18 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
   const feedbackTone = error ? "error" : "status";
 
   return (
-    <div style={{ position: "fixed", left: "clamp(0.85rem, 4vw, 1.75rem)", right: "clamp(0.85rem, 4vw, 1.75rem)", bottom: 0, paddingBottom: "calc(max(1rem, env(safe-area-inset-bottom)) + 0.75rem)", zIndex: 30 }}>
+    <div className="chat-composer">
       {live ? (
-        <form onSubmit={submitMessage} style={{ display: "grid", gap: "0.5rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", borderTop: "1px solid rgba(0,255,65,0.1)", paddingTop: "0.7rem" }}>
+        <form className="chat-composer__form" onSubmit={submitMessage}>
+          <div className="chat-composer__controls">
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.05rem", letterSpacing: "0.06em", maxWidth: "min(26vw, 140px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{identity.displayName}</span>
             <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
             <input value={body} onChange={event => setBody(event.target.value)} aria-label="Message" style={{ ...terminalInputStyle, fontSize: "1.05rem" }} />
             <button disabled={!canSend} style={sendButtonStyle(canSend)}>send</button>
           </div>
-          <p style={{ fontFamily: VT, color: isTooLong ? "#ff5c5c" : "rgba(0,255,65,0.55)", fontSize: "0.85rem", textAlign: "right" }}>
-            {trimmedLength} / {VISITOR_MESSAGE_LIMIT}
-          </p>
-          {feedbackMessage && (
-            <p role={feedbackTone === "error" ? "alert" : "status"} aria-live={feedbackTone === "error" ? "assertive" : "polite"} style={{ fontFamily: VT, color: feedbackTone === "error" ? "#ff5c5c" : GREEN, fontSize: "0.95rem", margin: 0 }}>
-              {feedbackMessage}
-            </p>
-          )}
+          <div className="chat-composer__feedback" role={feedbackMessage ? feedbackTone === "error" ? "alert" : "status" : undefined} aria-live={feedbackTone === "error" ? "assertive" : "polite"} style={{ color: feedbackTone === "error" ? "#ff5c5c" : GREEN }}>
+            {feedbackMessage}
+          </div>
         </form>
       ) : (
         <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "1.05rem" }}>
