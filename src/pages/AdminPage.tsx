@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Radio, Trash2 } from "lucide-react";
 import { dateTimeLocalToUtc, formatDateTimeLocal } from "@/lib/datetime";
+import { EVENT_NOT_READY_MESSAGE, EventReadinessError, validateEventReadiness, type EventReadinessFieldErrors, type EventReadinessInput } from "@/lib/eventReadiness";
 import { useEventChat } from "@/hooks/useEventChat";
 import { logout } from "@/services/authService";
 import { deleteChatMessage, getAdminChatMessages, sendAdminMessage, setMessageHighlighted, setMessagePinned, setMessageStatus, updateMessageFlags } from "@/services/chatService";
@@ -86,6 +87,7 @@ export default function AdminPage() {
   const [audioPreviewError, setAudioPreviewError] = useState("");
   const [audioPreviewAttempt, setAudioPreviewAttempt] = useState(0);
   const [artistImageWarning, setArtistImageWarning] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<EventReadinessFieldErrors>({});
   const [activeTab, setActiveTab] = useState<AdminTab>("event");
   const mutationInFlight = useRef(false);
   const mutationIdRef = useRef(0);
@@ -110,7 +112,6 @@ export default function AdminPage() {
   }, []);
 
   const disabled = loading || busy;
-  const hasRequiredMedia = Boolean(event?.audio_path || pendingFiles.audio) && Boolean(event?.artwork_path || event?.artist_image_path || pendingFiles.artwork || pendingFiles.artistImage);
   const archivedEvents = useMemo(() => events.filter(isArchivedEvent).sort(compareArchivedEvents), [events]);
 
   function syncSavedEvent(saved: MusicEvent) {
@@ -181,6 +182,15 @@ export default function AdminPage() {
   }, [localArtistImageUrl]);
 
   const setField = (key: keyof FormState, value: string) => {
+    setFieldErrors(current => {
+      const next = { ...current };
+      if (key === "title") delete next.title;
+      if (key === "artist_name") delete next.artistName;
+      if (key === "starts_at") delete next.startsAt;
+      if (key === "ends_at") delete next.endsAt;
+      if (key === "merch_url") delete next.merchUrl;
+      return next;
+    });
     setForm(current => ({ ...current, [key]: value }));
   };
 
@@ -245,28 +255,25 @@ export default function AdminPage() {
     return { updates, uploadedKeys };
   }
 
-  function validateUrls() {
-    for (const [label, value] of [["support URL", form.support_url], ["merch URL", form.merch_url], ["event URL", form.event_url]]) {
-      if (!value) continue;
-      try {
-        const url = new URL(value);
-        if (!["http:", "https:"].includes(url.protocol)) throw new Error();
-      } catch {
-        throw new Error(`Enter a valid ${label}.`);
+  function validateUrl(label: string, value: string, options?: { httpsOnly?: boolean }) {
+    if (!value.trim()) return;
+    try {
+      const url = new URL(value.trim());
+      if (options?.httpsOnly) {
+        if (url.protocol !== "https:") throw new Error();
+      } else if (!["http:", "https:"].includes(url.protocol)) {
+        throw new Error();
       }
+    } catch {
+      throw new Error(options?.httpsOnly ? `Enter a valid HTTPS ${label}.` : `Enter a valid ${label}.`);
     }
   }
 
-  function validateEventWindow() {
-    if (!form.starts_at) throw new Error("Choose an event start date and time.");
-    if (!form.ends_at) throw new Error("Choose an event end date and time.");
-
-    const startsAt = new Date(form.starts_at).getTime();
-    const endsAt = new Date(form.ends_at).getTime();
-
-    if (Number.isNaN(startsAt)) throw new Error("Enter a valid event start date and time.");
-    if (Number.isNaN(endsAt)) throw new Error("Enter a valid event end date and time.");
-    if (endsAt <= startsAt) throw new Error("Event End Date and Time must be later than Event Start Date and Time.");
+  function validateUrls() {
+    for (const [label, value] of [["support URL", form.support_url], ["event URL", form.event_url]]) {
+      validateUrl(label, value);
+    }
+    validateUrl("merch link", form.merch_url, { httpsOnly: true });
   }
 
   function toUpdateInput(extra?: UpdateEventInput): UpdateEventInput {
@@ -282,6 +289,34 @@ export default function AdminPage() {
       event_url: form.event_url.trim() || null,
       ...extra,
     };
+  }
+
+  function getStartReadinessCandidate(): EventReadinessInput {
+    return {
+      title: form.title,
+      artist_name: form.artist_name,
+      starts_at: dateTimeLocalToUtc(form.starts_at),
+      ends_at: dateTimeLocalToUtc(form.ends_at),
+      audio_path: event?.audio_path || (pendingFiles.audio ? "pending-audio-upload" : null),
+      artist_image_path: event?.artist_image_path || (pendingFiles.artistImage ? "pending-artist-image-upload" : null),
+      merch_image_path: event?.merch_image_path || (pendingFiles.merchImage ? "pending-merch-image-upload" : null),
+      merch_url: form.merch_url,
+    };
+  }
+
+  function validateStartReadinessForUi() {
+    const result = validateEventReadiness(getStartReadinessCandidate());
+    setFieldErrors(result.fieldErrors);
+    if (!result.ready) {
+      setError(EVENT_NOT_READY_MESSAGE);
+      return false;
+    }
+    return true;
+  }
+
+  function handleReadinessError(error: EventReadinessError) {
+    setFieldErrors(error.fieldErrors);
+    setError(error.message);
   }
 
   function verifyReturnedMediaPaths(expectedEventId: string, saved: MusicEvent, uploadedUpdates: UpdateEventInput) {
@@ -318,9 +353,8 @@ export default function AdminPage() {
       throw new Error("Uploaded audio could not be verified. Please upload it again.");
     }
 
-    const requiredVisualPath = saved.artwork_path || saved.artist_image_path;
-    if (!requiredVisualPath) {
-      throw new Error("Upload artwork or an artist image before starting.");
+    if (!saved.artist_image_path) {
+      throw new Error("Uploaded artist image could not be verified. Please upload it again.");
     }
 
     if (saved.artwork_path) {
@@ -329,11 +363,9 @@ export default function AdminPage() {
       if (!artworkExists) throw new Error("Uploaded artwork could not be verified. Please upload it again.");
     }
 
-    if (saved.artist_image_path) {
-      assertStoragePathBelongsToEvent("artist-images", saved.artist_image_path, saved.id);
-      const artistImageExists = await verifyStorageObjectExists("artist-images", saved.artist_image_path);
-      if (!artistImageExists) throw new Error("Uploaded artist image could not be verified. Please upload it again.");
-    }
+    assertStoragePathBelongsToEvent("artist-images", saved.artist_image_path, saved.id);
+    const artistImageExists = await verifyStorageObjectExists("artist-images", saved.artist_image_path);
+    if (!artistImageExists) throw new Error("Uploaded artist image could not be verified. Please upload it again.");
 
     if (saved.merch_image_path) {
       assertStoragePathBelongsToEvent("merch-images", saved.merch_image_path, saved.id);
@@ -359,7 +391,6 @@ export default function AdminPage() {
         currentEventId: event?.id ?? null,
       });
       validateUrls();
-      validateEventWindow();
       const baseEvent = await ensureEvent();
       logAdminMutation(mutationId, "event-ready", { eventId: baseEvent.id });
       const { updates: uploadUpdates, uploadedKeys } = await uploadPendingFiles(baseEvent, mutationId);
@@ -381,7 +412,11 @@ export default function AdminPage() {
       clearConfirmedPendingFiles(uploadedKeys);
       setMessage(label);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      if (err instanceof EventReadinessError) {
+        handleReadinessError(err);
+      } else {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      }
     } finally {
       setUploadStatus("");
       setBusy(false);
@@ -391,12 +426,14 @@ export default function AdminPage() {
 
   async function handleSaveDraft(eventArg?: FormEvent) {
     eventArg?.preventDefault();
+    setFieldErrors({});
     await runAction("Draft saved.", async (baseEvent, updates) => updateEvent(baseEvent.id, { ...updates, status: "draft" }));
   }
 
   async function handleStartEvent() {
-    if (!hasRequiredMedia) {
-      setError("Upload audio and artwork or an artist image before starting.");
+    setError("");
+    setMessage("");
+    if (!validateStartReadinessForUi()) {
       return;
     }
     await runAction(
@@ -408,6 +445,9 @@ export default function AdminPage() {
         });
         const savedDraft = await updateEvent(baseEvent.id, updates);
         verifyReturnedMediaPaths(baseEvent.id, savedDraft, updates);
+        const readiness = validateEventReadiness(savedDraft);
+        setFieldErrors(readiness.fieldErrors);
+        if (!readiness.ready) throw new EventReadinessError(readiness.fieldErrors);
         logAdminMutation(mutationId, "verify-storage-before-start", {
           eventId: savedDraft.id,
           audioPath: savedDraft.audio_path,
@@ -497,10 +537,10 @@ export default function AdminPage() {
 
           <Panel title="Song Info">
             <Grid>
-              <Field label="Event Title" value={form.title} onChange={value => setField("title", value)} />
-              <Field label="Artist Name" value={form.artist_name} onChange={value => setField("artist_name", value)} />
-              <Field label="Event Start Date and Time" type="datetime-local" value={form.starts_at} onChange={value => setField("starts_at", value)} />
-              <Field label="Event End Date and Time" type="datetime-local" value={form.ends_at} onChange={value => setField("ends_at", value)} />
+              <Field label="Event Title" requiredNote="Required to start the event." error={fieldErrors.title} value={form.title} onChange={value => setField("title", value)} />
+              <Field label="Artist Name" requiredNote="Required to start the event." error={fieldErrors.artistName} value={form.artist_name} onChange={value => setField("artist_name", value)} />
+              <Field label="Event Start Date and Time" requiredNote="Required to start the event." error={fieldErrors.startsAt} type="datetime-local" value={form.starts_at} onChange={value => setField("starts_at", value)} />
+              <Field label="Event End Date and Time" requiredNote="Required to start the event." error={fieldErrors.endsAt} type="datetime-local" value={form.ends_at} onChange={value => setField("ends_at", value)} />
             </Grid>
           </Panel>
 
@@ -516,7 +556,12 @@ export default function AdminPage() {
             previewLoading={audioPreviewLoading}
             previewError={audioPreviewError}
             onPreviewRetry={() => setAudioPreviewAttempt(attempt => attempt + 1)}
-            onFile={file => setPendingFiles(current => ({ ...current, audio: file }))}
+            requiredNote="Required to start the event."
+            error={fieldErrors.song}
+            onFile={file => {
+              setFieldErrors(current => ({ ...current, song: undefined }));
+              setPendingFiles(current => ({ ...current, audio: file }));
+            }}
           />
           <FilePicker
             label="Artwork"
@@ -542,7 +587,12 @@ export default function AdminPage() {
             previewAlt="Artist image preview"
             previewAspectRatio="4 / 5"
             warning={artistImageWarning}
-            onFile={file => setPendingFiles(current => ({ ...current, artistImage: file }))}
+            requiredNote="Required to start the event."
+            error={fieldErrors.artistImage}
+            onFile={file => {
+              setFieldErrors(current => ({ ...current, artistImage: undefined }));
+              setPendingFiles(current => ({ ...current, artistImage: file }));
+            }}
           />
           <FilePicker
             label="Merch Image"
@@ -554,13 +604,17 @@ export default function AdminPage() {
             previewType="image"
             previewUrl={mediaPreviews.merchImage}
             previewAlt="Merch image preview"
-            onFile={file => setPendingFiles(current => ({ ...current, merchImage: file }))}
+            error={fieldErrors.merchImage}
+            onFile={file => {
+              setFieldErrors(current => ({ ...current, merchImage: undefined, merchUrl: undefined }));
+              setPendingFiles(current => ({ ...current, merchImage: file }));
+            }}
           />
 
           <Panel title="Support Links">
             <Grid>
               <Field label="Support URL" value={form.support_url} onChange={value => setField("support_url", value)} />
-              <Field label="Merchandise URL" value={form.merch_url} onChange={value => setField("merch_url", value)} />
+              <Field label="Merchandise URL" error={fieldErrors.merchUrl} value={form.merch_url} onChange={value => setField("merch_url", value)} />
               <Field label="Event URL" value={form.event_url} onChange={value => setField("event_url", value)} />
             </Grid>
           </Panel>
@@ -1198,11 +1252,13 @@ function Grid({ children }: { children: React.ReactNode }) {
   return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>{children}</div>;
 }
 
-function Field({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+function Field({ label, value, onChange, type = "text", requiredNote, error }: { label: string; value: string; onChange: (value: string) => void; type?: string; requiredNote?: string; error?: string }) {
   return (
     <label style={{ display: "block" }}>
       <span style={{ fontSize: 12, color: "#6b7280", display: "block", marginBottom: 4 }}>{label}</span>
+      {requiredNote && <span style={{ fontSize: 11, color: "#9ca3af", display: "block", marginBottom: 4 }}>{requiredNote}</span>}
       <input type={type} value={value} min={type === "number" ? 0.1 : undefined} step={type === "number" ? 0.5 : undefined} onChange={event => onChange(event.target.value)} style={inputStyle} />
+      {error && <span style={{ fontSize: 12, color: "#b91c1c", display: "block", marginTop: 4 }}>{error}</span>}
     </label>
   );
 }

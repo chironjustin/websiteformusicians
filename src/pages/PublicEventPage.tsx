@@ -2060,16 +2060,14 @@ function FinishedPage({ event, title, merchImage }: { event: MusicEvent; title: 
     );
   }
 
-  if (event.merch_url || merchImage) {
+  if (event.merch_url && merchImage) {
     sections.push(
       <div key="merch" style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem" }}>
         <p style={headingStyle}>buy merch</p>
-        {merchImage && (
-          <a href={event.merch_url || undefined} target={event.merch_url ? "_blank" : undefined} rel="noopener noreferrer" style={{ display: "block", border: `2px solid ${GREEN}` }}>
-            <img src={merchImage} alt="Merchandise" style={{ width: 160, height: 160, objectFit: "cover", display: "block" }} />
-          </a>
-        )}
-        {event.merch_url && <a href={event.merch_url} target="_blank" rel="noopener noreferrer" style={linkStyle}>→ {merchImage ? "shop now" : "go to shop"}</a>}
+        <a href={event.merch_url} target="_blank" rel="noopener noreferrer" style={{ display: "block", border: `2px solid ${GREEN}` }}>
+          <img src={merchImage} alt="Merchandise" style={{ width: 160, height: 160, objectFit: "cover", display: "block" }} />
+        </a>
+        <a href={event.merch_url} target="_blank" rel="noopener noreferrer" style={linkStyle}>→ shop now</a>
       </div>,
     );
   }

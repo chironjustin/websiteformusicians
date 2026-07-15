@@ -12,6 +12,8 @@ interface FilePickerProps {
   previewError?: string;
   onPreviewRetry?: () => void;
   warning?: string;
+  requiredNote?: string;
+  error?: string;
   disabled?: boolean;
   onFile: (file: File | null) => void;
 }
@@ -30,12 +32,15 @@ export default function FilePicker({
   previewError,
   onPreviewRetry,
   warning,
+  requiredNote,
+  error,
   disabled,
   onFile,
 }: FilePickerProps) {
   return (
     <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
       <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{label}</p>
+      {requiredNote && <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>{requiredNote}</p>}
       <p style={{ fontSize: 12, color: "#9ca3af", marginBottom: 10 }}>{hint}</p>
       {previewType === "image" && (
         <div style={{
@@ -91,6 +96,7 @@ export default function FilePicker({
       <p style={{ fontSize: 12, color: pendingFile ? "#15803d" : "#6b7280", marginTop: 8 }}>
         {pendingFile ? `Selected: ${pendingFile.name}` : currentLabel || "No file uploaded yet."}
       </p>
+      {error && <p style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{error}</p>}
       {warning && <p style={{ fontSize: 12, color: "#b45309", marginTop: 6 }}>{warning}</p>}
     </div>
   );

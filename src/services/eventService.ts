@@ -1,33 +1,14 @@
 import { supabase } from "@/lib/supabase";
+import { assertEventReadyToStart, EventReadinessError } from "@/lib/eventReadiness";
 import type { CreateEventInput, MusicEvent, UpdateEventInput } from "@/types/event";
 
 const PUBLIC_STATUSES = ["upcoming", "live", "finished"];
 type PublicSelectionReason = "live" | "upcoming" | "finished";
 
 function toUsefulError(error: unknown, fallback: string) {
+  if (error instanceof EventReadinessError) return error;
   if (error instanceof Error && error.message) return error;
   return new Error(fallback);
-}
-
-function validateStartable(event: Partial<MusicEvent>) {
-  if (!event.title?.trim()) throw new Error("Add an event title before starting.");
-  if (!event.audio_path) throw new Error("Upload an audio file before starting.");
-  if (!event.artwork_path && !event.artist_image_path) {
-    throw new Error("Upload artwork or an artist image before starting.");
-  }
-  validateEventWindow(event.starts_at, event.ends_at);
-}
-
-function validateEventWindow(startsAt: string | null | undefined, endsAt: string | null | undefined) {
-  if (!startsAt) throw new Error("Choose an event start date and time.");
-  if (!endsAt) throw new Error("Choose an event end date and time.");
-
-  const startTime = new Date(startsAt).getTime();
-  const endTime = new Date(endsAt).getTime();
-
-  if (Number.isNaN(startTime)) throw new Error("Enter a valid event start date and time.");
-  if (Number.isNaN(endTime)) throw new Error("Enter a valid event end date and time.");
-  if (endTime <= startTime) throw new Error("Event End Date and Time must be later than Event Start Date and Time.");
 }
 
 async function requireUserId() {
@@ -59,6 +40,9 @@ async function selectCurrentPublicEventByReason(reason: PublicSelectionReason, n
       .not("starts_at", "is", null)
       .not("ends_at", "is", null)
       .not("audio_path", "is", null)
+      .not("artist_image_path", "is", null)
+      .not("artist_name", "is", null)
+      .not("title", "is", null)
       .lte("starts_at", now)
       .gt("ends_at", now)
       .in("status", ["upcoming", "live"])
@@ -68,12 +52,19 @@ async function selectCurrentPublicEventByReason(reason: PublicSelectionReason, n
       ? query
         .not("starts_at", "is", null)
         .not("audio_path", "is", null)
+        .not("artist_image_path", "is", null)
+        .not("artist_name", "is", null)
+        .not("title", "is", null)
         .gt("starts_at", now)
         .eq("status", "upcoming")
         .order("starts_at", { ascending: true, nullsFirst: false })
         .order("updated_at", { ascending: false })
       : query
         .not("ends_at", "is", null)
+        .not("audio_path", "is", null)
+        .not("artist_image_path", "is", null)
+        .not("artist_name", "is", null)
+        .not("title", "is", null)
         .lte("ends_at", now)
         .in("status", ["upcoming", "live", "finished"])
         .order("ends_at", { ascending: false, nullsFirst: false })
@@ -128,6 +119,11 @@ export async function createEvent(input: CreateEventInput) {
 
 export async function updateEvent(id: string, input: UpdateEventInput) {
   await requireUserId();
+  if (input.status === "upcoming" || input.status === "live") {
+    const existing = await getEventById(id);
+    if (!existing) throw new Error("Event not found.");
+    assertEventReadyToStart({ ...existing, ...input });
+  }
   const { data, error } = await supabase.from("events").update(input).eq("id", id).select("*").single<MusicEvent>();
   if (error) throw toUsefulError(error, "Unable to update event.");
   return data;
@@ -138,7 +134,7 @@ export async function startEvent(id: string, latest?: UpdateEventInput) {
   if (!existing) throw new Error("Event not found.");
 
   const candidate = { ...existing, ...latest };
-  validateStartable(candidate);
+  assertEventReadyToStart(candidate);
   const startsAt = new Date(candidate.starts_at!).getTime();
   const endsAt = new Date(candidate.ends_at!).getTime();
   const now = Date.now();
