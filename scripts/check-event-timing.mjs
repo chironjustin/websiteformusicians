@@ -132,6 +132,9 @@ assert(chatSchema.includes("create or replace function public.submit_chat_messag
 assert(chatSchema.includes("create table if not exists public.event_chat_participants") && chatSchema.includes("event_chat_participants_event_normalized_name_idx"), "Chat schema must enforce event-scoped temporary username uniqueness.");
 assert(chatSchema.includes("session_id uuid") && chatSchema.includes("event_chat_participants_event_session_idx"), "Chat schema must preserve generated chat identity by event and session.");
 assert(chatSchema.includes("create or replace function public.join_event_chat"), "Chat schema must generate anonymous event identities server-side.");
+assert(chatSchema.includes("drop function if exists public.chat_generated_first_names()") && !chatSchema.includes("create or replace function public.chat_generated_first_names"), "Chat schema must remove, not recreate, the obsolete synthetic generated-name helper.");
+assert(chatSchema.includes("from public.pick_chat_base_name(event_artist_name) picked") && chatSchema.includes("for suffix_number in 1..50"), "Chat schema must use the curated name pool with sequential event-level suffixes.");
+assert(chatSchema.includes("should_reassign_existing") && chatSchema.includes("regexp_replace(existing_participant.display_name"), "Chat schema must repair existing synthetic participant names on the next join.");
 assert(chatSchema.includes("revoke select, insert, update, delete on public.event_chat_participants from anon, authenticated"), "Participant identity rows must not be directly enumerable by public clients.");
 assert(chatSchema.includes("returns table") && !chatSchema.includes("p_avatar_id text") && !chatSchema.includes("avatar :="), "Generated identity RPC must return only identity fields and must not accept or assign avatars.");
 assert(chatSchema.includes("revoke insert on public.chat_messages from anon"), "Anonymous visitors must not rely on fragile direct table inserts.");
@@ -145,6 +148,7 @@ assert(chatSchema.includes("notify pgrst, 'reload schema'"), "Chat schema must r
 const noAvatarIdentityMigration = readFileSync("supabase/chat-generated-identity-remove-avatars.sql", "utf8");
 assert(noAvatarIdentityMigration.includes("alter column avatar_id drop not null") && noAvatarIdentityMigration.includes("drop constraint if exists event_chat_participants_avatar_id_check"), "No-avatar identity migration must make historical avatar columns non-blocking.");
 assert(noAvatarIdentityMigration.includes("returns table") && !noAvatarIdentityMigration.includes("p_avatar_id") && !noAvatarIdentityMigration.includes("participant.avatar_id"), "No-avatar identity migration must replace active RPCs without avatar inputs or message avatar copying.");
+assert(noAvatarIdentityMigration.includes("should_reassign_existing") && noAvatarIdentityMigration.includes("regexp_replace(existing_participant.display_name"), "No-avatar identity migration must repair existing synthetic participant names on the next join.");
 
 const namePoolMigration = readFileSync("supabase/chat-name-pool-migration.sql", "utf8");
 assert(namePoolMigration.includes("create table if not exists public.chat_name_pool") && namePoolMigration.includes("region_group in ('western', 'international')"), "Generated chat names must be stored in a weighted database pool.");
@@ -152,6 +156,37 @@ assert(namePoolMigration.includes("chat_name_pool_normalized_name_idx") && nameP
 assert(namePoolMigration.includes("chat_name_pool_exclusions") && namePoolMigration.includes("extremist/historical abuse") && namePoolMigration.includes("reserved system name"), "Unsafe supplied names must be explicitly excluded with reason categories.");
 assert(namePoolMigration.includes("drop function if exists public.chat_generated_first_names()"), "Name-pool migration must remove the obsolete synthetic name generator.");
 assert(namePoolMigration.includes("random() < 0.7") && !namePoolMigration.includes("foreign"), "Name pool selection must use the western/international weighting without forbidden terminology.");
+assert(namePoolMigration.includes("should_reassign_existing") && namePoolMigration.includes("regexp_replace(existing_participant.display_name"), "Name-pool migration must repair existing synthetic participant names on the next join.");
+
+const generatedIdentityMigration = readFileSync("supabase/chat-generated-identity-migration.sql", "utf8");
+assert(generatedIdentityMigration.includes("drop function if exists public.chat_generated_first_names()") && !generatedIdentityMigration.includes("create or replace function public.chat_generated_first_names"), "Generated identity migration must not recreate the obsolete synthetic name helper.");
+assert(generatedIdentityMigration.includes("from public.pick_chat_base_name(event_artist_name) picked") && generatedIdentityMigration.includes("for suffix_number in 1..50"), "Generated identity migration must use the curated name pool with sequential suffixes.");
+assert(generatedIdentityMigration.includes("should_reassign_existing") && generatedIdentityMigration.includes("regexp_replace(existing_participant.display_name"), "Generated identity migration must repair existing synthetic participant names on the next join.");
+
+const curatedNameRepairMigration = readFileSync("supabase/chat-curated-name-flow-repair.sql", "utf8");
+assert(curatedNameRepairMigration.includes("drop function if exists public.chat_generated_first_names()") && curatedNameRepairMigration.includes("from public.pick_chat_base_name(event_artist_name) picked"), "Curated-name repair migration must remove the legacy generator and reinstall the pool-backed join function.");
+assert(curatedNameRepairMigration.includes("should_reassign_existing") && curatedNameRepairMigration.includes("chat_name_pool_missing"), "Curated-name repair migration must repair old synthetic rows and fail clearly if the name pool has not been installed.");
+
+const obsoleteNameFragments = [
+  "prefix(value)",
+  "suffix(value)",
+  "floor(random() * 990)",
+  "floor(random() * array_length",
+  "Aiko' ||",
+];
+
+for (const [label, source] of [
+  ["chat schema", chatSchema],
+  ["generated identity migration", generatedIdentityMigration],
+  ["no-avatar identity migration", noAvatarIdentityMigration],
+  ["name-pool migration", namePoolMigration],
+  ["curated name repair migration", curatedNameRepairMigration],
+]) {
+  for (const fragment of obsoleteNameFragments) {
+    assert(!source.includes(fragment), `${label} must not contain obsolete synthetic generated-name fragment: ${fragment}`);
+  }
+}
+
 assert(noAvatarIdentityMigration.includes("for suffix_number in 1..50") && noAvatarIdentityMigration.includes("suffix_number = 1") && noAvatarIdentityMigration.includes("|| suffix_number::text"), "Generated names must use sequential event-level suffixes instead of random numeric suffixes.");
 assert(!noAvatarIdentityMigration.includes("floor(random() * 990)") && !namePoolMigration.includes("floor(random() * 990)") && !namePoolMigration.includes("participant.avatar_id"), "New name-pool identity flow must not use random suffixes or restore avatars.");
 

@@ -485,6 +485,8 @@ declare
   base_normalized text;
   candidate_name text;
   normalized_candidate text;
+  existing_base_name text;
+  should_reassign_existing boolean := false;
   attempt integer;
   suffix_number integer;
 begin
@@ -520,6 +522,35 @@ begin
   limit 1;
 
   if existing_participant.id is not null then
+    existing_base_name := regexp_replace(existing_participant.display_name, '[0-9]+$', '');
+
+    if exists (
+      select 1
+      from public.chat_name_pool pool
+      where pool.is_active = true
+        and pool.normalized_name = public.normalize_chat_name(existing_base_name)
+    ) then
+      update public.event_chat_participants
+      set last_seen_at = now()
+      where event_chat_participants.id = existing_participant.id
+      returning * into existing_participant;
+
+      return query
+        select
+          existing_participant.id,
+          existing_participant.event_id,
+          existing_participant.session_id,
+          existing_participant.display_name,
+          existing_participant.normalized_name,
+          existing_participant.created_at,
+          existing_participant.last_seen_at;
+      return;
+    end if;
+
+    should_reassign_existing := true;
+  end if;
+
+  if existing_participant.id is not null and should_reassign_existing = false then
     update public.event_chat_participants
     set last_seen_at = now()
     where event_chat_participants.id = existing_participant.id
@@ -567,21 +598,30 @@ begin
       end if;
 
       begin
-        insert into public.event_chat_participants (
-          event_id,
-          session_id,
-          display_name,
-          normalized_name,
-          last_seen_at
-        )
-        values (
-          p_event_id,
-          p_session_id,
-          candidate_name,
-          normalized_candidate,
-          now()
-        )
-        returning * into inserted_participant;
+        if should_reassign_existing then
+          update public.event_chat_participants
+          set display_name = candidate_name,
+              normalized_name = normalized_candidate,
+              last_seen_at = now()
+          where event_chat_participants.id = existing_participant.id
+          returning * into inserted_participant;
+        else
+          insert into public.event_chat_participants (
+            event_id,
+            session_id,
+            display_name,
+            normalized_name,
+            last_seen_at
+          )
+          values (
+            p_event_id,
+            p_session_id,
+            candidate_name,
+            normalized_candidate,
+            now()
+          )
+          returning * into inserted_participant;
+        end if;
 
         return query
           select
@@ -602,7 +642,7 @@ begin
             and event_chat_participants.session_id = p_session_id
           limit 1;
 
-          if existing_participant.id is not null then
+          if existing_participant.id is not null and should_reassign_existing = false then
             return query
               select
                 existing_participant.id,
