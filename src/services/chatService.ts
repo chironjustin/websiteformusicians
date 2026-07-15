@@ -91,7 +91,18 @@ export async function joinEventChatIdentity(input: { event_id: string; session_i
     throw new Error("Could not join the chat. Please try again.");
   }
 
-  return data as ChatParticipant;
+  const participant = Array.isArray(data) ? data[0] : data;
+  if (!participant?.id || !participant.session_id || !participant.display_name) {
+    console.error("[chat-join]", {
+      operation: "join_event_chat",
+      eventId: input.event_id,
+      code: "invalid_identity_response",
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+    throw new Error("Could not join the chat. Please try again.");
+  }
+
+  return participant as ChatParticipant;
 }
 
 export async function getVisitorMessageStatus(eventId: string, messageId: string, clientToken: string) {
