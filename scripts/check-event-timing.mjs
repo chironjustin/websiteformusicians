@@ -90,7 +90,8 @@ assert(publicPage.includes("function LiveEventView") && publicPage.includes("fun
 assert(!publicPage.includes("function StatusPanel") && !publicPage.includes("function ChatDrawer"), "Public debug/status switcher and drawer path must not render publicly.");
 assert(!publicPage.includes("function LivePage"), "Live state must not use the old artwork-based LivePage.");
 assert(!publicPage.includes("Artwork size={320}"), "Live state must not mount the Upcoming artwork composition.");
-assert(publicPage.includes("join chat") && publicPage.includes("choose name:"), "Live state must include the centered chat entry composition.");
+assert(publicPage.includes("join chat") && publicPage.includes("[ join ]"), "Live state must include the one-click chat join composition.");
+assert(!publicPage.includes("choose name:") && !publicPage.includes('aria-label="Display name"'), "Live chat onboarding must not render a username input.");
 assert(publicPage.includes('CHAT_NAME_KEY_PREFIX = "music-event-chat-name:"'), "Live chat name must use the event-specific key prefix.");
 assert(publicPage.includes("getEventChatNameKey(eventId)"), "Live chat name must be keyed by the database event id.");
 assert(publicPage.includes("storeChatIdentity(eventId, identity)") && publicPage.includes("getEventChatParticipantKey(eventId)"), "Joining chat must persist the event-specific participant identity.");
@@ -112,19 +113,24 @@ assert(chatHook.includes("filter: `event_id=eq.${eventId}`"), "Realtime chat sub
 const chatService = readFileSync("src/services/chatService.ts", "utf8");
 assert(chatService.includes('.eq("event_id", eventId)') && chatService.includes('.eq("status", "approved")'), "Public chat query must fetch approved messages for the active event only.");
 assert(chatService.includes('supabase.rpc("submit_chat_message"') && chatService.includes("p_client_token") && chatService.includes("get_visitor_chat_message_status"), "Visitor submissions must use the scoped public RPC and pending-status lookup.");
-assert(chatService.includes("normalizeChatName") && chatService.includes("reserve_event_chat_identity") && chatService.includes("USER_AVATAR_IDS"), "Visitor chat names must use event-scoped reservation and the fixed avatar pool.");
+assert(chatService.includes("joinEventChatIdentity") && chatService.includes("getOrCreateChatSessionId") && chatService.includes("reserve_event_chat_identity") && chatService.includes("USER_AVATAR_IDS"), "Visitor chat names must use one-click event-scoped generated identity reservation and the fixed avatar pool.");
+assert(chatService.includes("getRandomInternationalFirstName") && chatService.includes("suffixGeneratedName") && chatService.includes("CHAT_NAME_TAKEN_MESSAGE"), "Generated chat names must use the large name pool and numeric suffix fallback for event duplicates.");
 assert(chatService.includes('supabase.rpc("set_chat_message_pin"') && chatService.includes('supabase.rpc("set_chat_message_highlight"'), "Pin and highlight actions must use event-scoped RPC helpers.");
 assert(chatService.includes("p_message_id") && chatService.includes("p_pinned") && chatService.includes("p_highlighted"), "Pin and highlight RPC calls must use the deployed p_ argument names.");
 
 const publicLivePage = readFileSync("src/pages/PublicEventPage.tsx", "utf8");
 assert(publicLivePage.includes("live ends {label}"), "Live header must show the compact event-end countdown label.");
 
+const firstNames = readFileSync("src/data/internationalFirstNames.ts", "utf8");
+assert(firstNames.includes("INTERNATIONAL_FIRST_NAMES.length < 5000") && firstNames.includes("getRandomInternationalFirstName"), "Generated chat identities must use the large international first-name dataset.");
+
 const chatSchema = readFileSync("supabase/chat-schema.sql", "utf8");
 assert(chatSchema.includes("event_id uuid references public.events") && chatSchema.includes("client_token uuid"), "Chat schema must associate messages with events and pending-status client tokens.");
 assert(chatSchema.includes("chat_messages_event_status_created_idx") && chatSchema.includes("chat_messages_event_client_token_idx"), "Chat schema must include event-scoped retrieval indexes.");
 assert(chatSchema.includes("create or replace function public.submit_chat_message"), "Chat schema must provide a public pending-message submit RPC.");
 assert(chatSchema.includes("create table if not exists public.event_chat_participants") && chatSchema.includes("event_chat_participants_event_normalized_name_idx"), "Chat schema must enforce event-scoped temporary username uniqueness.");
-assert(chatSchema.includes("create or replace function public.reserve_event_chat_identity") && chatSchema.includes("chat_name_taken"), "Chat schema must reserve temporary usernames atomically and reject artist-name collisions.");
+assert(chatSchema.includes("session_id uuid") && chatSchema.includes("event_chat_participants_event_session_idx"), "Chat schema must preserve generated chat identity by event and session.");
+assert(chatSchema.includes("create or replace function public.reserve_event_chat_identity") && chatSchema.includes("chat_name_taken"), "Chat schema must reserve generated names atomically and reject artist-name collisions.");
 assert(chatSchema.includes("revoke insert on public.chat_messages from anon"), "Anonymous visitors must not rely on fragile direct table inserts.");
 assert(chatSchema.includes("events.starts_at <= now()") && chatSchema.includes("events.ends_at > now()"), "Visitor submit RPC must require the active live timestamp window.");
 assert(chatSchema.includes("user_id") && chatSchema.includes("is_admin") && chatSchema.includes("is_pinned") && chatSchema.includes("is_highlighted") && chatSchema.includes("is_liked"), "Visitor submit RPC must force non-privileged pending messages.");

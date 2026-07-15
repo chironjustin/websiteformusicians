@@ -3,12 +3,9 @@ import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemaining
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
 import {
-  CHAT_NAME_LENGTH_MESSAGE,
-  CHAT_NAME_TAKEN_MESSAGE,
   USER_AVATAR_IDS,
   isUserAvatarId,
-  normalizeChatName,
-  reserveEventChatIdentity,
+  joinEventChatIdentity,
   sendVisitorMessage,
   getVisitorMessageStatus,
 } from "@/services/chatService";
@@ -68,6 +65,7 @@ const LEGACY_CHAT_IDENTITY_KEYS = ["live-chat-name", "chat-name", "username", "j
 
 type JoinedChatIdentity = {
   participantId: string;
+  sessionId: string;
   displayName: string;
   avatarId: string;
 };
@@ -730,9 +728,10 @@ function readStoredChatIdentity(eventId: string): JoinedChatIdentity | null {
   if (participantValue) {
     try {
       const parsed = JSON.parse(participantValue) as Partial<JoinedChatIdentity>;
-      if (parsed.participantId && parsed.displayName && isUserAvatarId(parsed.avatarId)) {
+      if (parsed.participantId && parsed.sessionId && parsed.displayName && isUserAvatarId(parsed.avatarId)) {
         return {
           participantId: parsed.participantId,
+          sessionId: parsed.sessionId,
           displayName: parsed.displayName,
           avatarId: parsed.avatarId,
         };
@@ -1570,7 +1569,7 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
         {joinedIdentity ? (
           <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} />
         ) : (
-          <JoinChatPanel eventId={eventId} artistName={artistName} onJoin={setJoinedIdentity} />
+          <JoinChatPanel eventId={eventId} onJoin={setJoinedIdentity} />
         )}
       </div>
     </div>
@@ -1723,28 +1722,19 @@ function ArtistMessageAvatar({ artistUrl }: { artistUrl: string }) {
   );
 }
 
-function JoinChatPanel({ eventId, artistName, onJoin }: { eventId: string; artistName: string; onJoin: (identity: JoinedChatIdentity) => void }) {
-  const [displayName, setDisplayName] = useState("");
+function JoinChatPanel({ eventId, onJoin }: { eventId: string; onJoin: (identity: JoinedChatIdentity) => void }) {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
 
   async function join(event: React.FormEvent) {
     event.preventDefault();
-    const name = displayName.replace(/\s+/g, " ").trim();
-    if (!name || name.length > 16) {
-      setError(CHAT_NAME_LENGTH_MESSAGE);
-      return;
-    }
-    if (normalizeChatName(name) === normalizeChatName(artistName)) {
-      setError(CHAT_NAME_TAKEN_MESSAGE);
-      return;
-    }
     setJoining(true);
     setError("");
     try {
-      const participant = await reserveEventChatIdentity({ event_id: eventId, display_name: name });
+      const participant = await joinEventChatIdentity({ event_id: eventId });
       const identity = {
         participantId: participant.id,
+        sessionId: participant.session_id,
         displayName: participant.display_name,
         avatarId: participant.avatar_id,
       };
@@ -1754,10 +1744,9 @@ function JoinChatPanel({ eventId, artistName, onJoin }: { eventId: string; artis
         joined: true,
         action: "join-submitted",
       });
-      setDisplayName("");
       onJoin(identity);
     } catch (err) {
-      setError(err instanceof Error ? err.message : CHAT_NAME_TAKEN_MESSAGE);
+      setError(err instanceof Error ? err.message : "could not join chat.");
     } finally {
       setJoining(false);
     }
@@ -1767,15 +1756,9 @@ function JoinChatPanel({ eventId, artistName, onJoin }: { eventId: string; artis
     <form onSubmit={join} style={{ position: "absolute", left: "50%", bottom: "clamp(8.5rem, 18vh, 13rem)", transform: "translateX(-50%)", width: "min(350px, 82vw)", display: "grid", gap: "1.25rem", zIndex: 3 }}>
       <div style={{ textAlign: "center", display: "grid", gap: "0.9rem" }}>
         <p style={{ fontFamily: PSP, fontSize: "clamp(1rem, 4vw, 1.55rem)", color: "#FFFFFF", letterSpacing: "0.06em" }}>join chat</p>
-        <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.25rem", letterSpacing: "0.22em" }}>choose name:</p>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: `2px solid ${GREEN}`, paddingBottom: "0.35rem" }}>
-        <span style={{ fontFamily: VT, color: GREEN, fontSize: "1.35rem" }}>›</span>
-        <input value={displayName} onChange={event => setDisplayName(event.target.value)} maxLength={16} aria-label="Display name" autoComplete={`event-${eventId}-name`} style={terminalInputStyle} />
-        <span className="cursor-blink" style={{ width: 10, height: 3, background: GREEN }} />
-      </div>
-      <button disabled={joining || !displayName.trim()} style={enterButtonStyle}>
-        [ enter ]
+      <button disabled={joining} style={enterButtonStyle}>
+        [ join ]
       </button>
       {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem", textAlign: "center" }}>{error}</p>}
     </form>

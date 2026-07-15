@@ -4,6 +4,7 @@
 create table if not exists public.event_chat_participants (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events(id) on delete cascade,
+  session_id uuid not null,
   display_name text not null,
   normalized_name text not null,
   avatar_id text not null,
@@ -38,6 +39,7 @@ create table if not exists public.chat_messages (
 );
 
 create unique index if not exists event_chat_participants_event_normalized_name_idx on public.event_chat_participants(event_id, normalized_name);
+create unique index if not exists event_chat_participants_event_session_idx on public.event_chat_participants(event_id, session_id) where session_id is not null;
 create index if not exists event_chat_participants_event_created_idx on public.event_chat_participants(event_id, created_at);
 create index if not exists chat_messages_event_status_created_idx on public.chat_messages(event_id, status, created_at);
 create index if not exists chat_messages_event_pinned_created_idx on public.chat_messages(event_id, is_pinned desc, created_at);
@@ -162,8 +164,11 @@ as $$
   select lower(btrim(regexp_replace(coalesce(p_value, ''), '[[:space:]]+', ' ', 'g')));
 $$;
 
+drop function if exists public.reserve_event_chat_identity(uuid, text, text, text);
+
 create or replace function public.reserve_event_chat_identity(
   p_event_id uuid,
+  p_session_id uuid,
   p_display_name text,
   p_normalized_name text,
   p_avatar_id text
@@ -177,6 +182,7 @@ declare
   clean_display_name text;
   clean_normalized_name text;
   event_artist_name text;
+  existing_participant public.event_chat_participants;
   inserted_participant public.event_chat_participants;
 begin
   clean_display_name := btrim(regexp_replace(coalesce(p_display_name, ''), '[[:space:]]+', ' ', 'g'));
@@ -184,6 +190,10 @@ begin
 
   if p_event_id is null then
     raise exception 'chat_event_required';
+  end if;
+
+  if p_session_id is null then
+    raise exception 'chat_session_required';
   end if;
 
   if clean_display_name = '' or char_length(clean_display_name) > 16 then
@@ -212,18 +222,34 @@ begin
     raise exception 'chat_event_not_live';
   end if;
 
+  select *
+  into existing_participant
+  from public.event_chat_participants
+  where event_id = p_event_id
+    and session_id = p_session_id
+  limit 1;
+
+  if existing_participant.id is not null then
+    if existing_participant.normalized_name = public.normalize_chat_name(event_artist_name) then
+      raise exception 'chat_name_taken';
+    end if;
+    return existing_participant;
+  end if;
+
   if clean_normalized_name = public.normalize_chat_name(event_artist_name) then
     raise exception 'chat_name_taken';
   end if;
 
   insert into public.event_chat_participants (
     event_id,
+    session_id,
     display_name,
     normalized_name,
     avatar_id
   )
   values (
     p_event_id,
+    p_session_id,
     clean_display_name,
     clean_normalized_name,
     p_avatar_id
@@ -237,8 +263,8 @@ exception
 end;
 $$;
 
-revoke all on function public.reserve_event_chat_identity(uuid, text, text, text) from public;
-grant execute on function public.reserve_event_chat_identity(uuid, text, text, text) to anon, authenticated;
+revoke all on function public.reserve_event_chat_identity(uuid, uuid, text, text, text) from public;
+grant execute on function public.reserve_event_chat_identity(uuid, uuid, text, text, text) to anon, authenticated;
 
 drop function if exists public.submit_chat_message(uuid, text, text, uuid);
 

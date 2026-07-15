@@ -21,6 +21,7 @@ export interface ChatMessage {
 export interface ChatParticipant {
   id: string;
   event_id: string;
+  session_id: string;
   display_name: string;
   normalized_name: string;
   avatar_id: string;

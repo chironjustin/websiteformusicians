@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { getRandomInternationalFirstName } from "@/data/internationalFirstNames";
 import type { ChatMessage, ChatMessageStatus, ChatParticipant, CreateAdminChatMessageInput, CreateVisitorChatMessageInput } from "@/types/chat";
 
 export const CHAT_NAME_LENGTH_MESSAGE = "name must be 1–16 characters";
@@ -14,6 +15,7 @@ export const USER_AVATAR_IDS = [
   "retro-8",
 ] as const;
 
+const CHAT_SESSION_KEY = "music-event-chat-session-id";
 const MAX_DISPLAY_NAME = 16;
 const MAX_ADMIN_DISPLAY_NAME = 50;
 const MAX_BODY = 500;
@@ -53,6 +55,19 @@ function assertDisplayName(displayName: string) {
 
 function assertEventId(eventId: string | null | undefined) {
   if (!eventId) throw new Error("A current event is required before sending chat messages.");
+}
+
+export function getOrCreateChatSessionId() {
+  const existing = window.localStorage.getItem(CHAT_SESSION_KEY);
+  if (existing) return existing;
+  const next = crypto.randomUUID();
+  window.localStorage.setItem(CHAT_SESSION_KEY, next);
+  return next;
+}
+
+function suffixGeneratedName(baseName: string) {
+  const suffix = String(Math.floor(Math.random() * 990) + 10);
+  return `${baseName.slice(0, Math.max(1, MAX_DISPLAY_NAME - suffix.length))}${suffix}`;
 }
 
 function orderedMessagesQuery() {
@@ -105,17 +120,17 @@ export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
   return data as ChatMessage;
 }
 
-export async function reserveEventChatIdentity(input: { event_id: string; display_name: string; avatar_id?: string }) {
+async function reserveGeneratedEventChatIdentity(input: { event_id: string; session_id: string; display_name: string; avatar_id: string }) {
   assertEventId(input.event_id);
   const displayName = cleanDisplayName(input.display_name);
   assertDisplayName(displayName);
-  const avatarId = isUserAvatarId(input.avatar_id) ? input.avatar_id : pickRandomUserAvatarId();
 
   const { data, error } = await supabase.rpc("reserve_event_chat_identity", {
-    p_avatar_id: avatarId,
+    p_avatar_id: input.avatar_id,
     p_display_name: displayName,
     p_event_id: input.event_id,
     p_normalized_name: normalizeChatName(displayName),
+    p_session_id: input.session_id,
   });
 
   if (error) {
@@ -124,6 +139,7 @@ export async function reserveEventChatIdentity(input: { event_id: string; displa
       message.includes("chat_name_taken")
       || message.includes("duplicate key")
       || message.includes("event_chat_participants_event_normalized_name_key")
+      || message.includes("event_chat_participants_event_normalized_name_idx")
     ) {
       throw new Error(CHAT_NAME_TAKEN_MESSAGE);
     }
@@ -134,6 +150,31 @@ export async function reserveEventChatIdentity(input: { event_id: string; displa
   }
 
   return data as ChatParticipant;
+}
+
+export async function joinEventChatIdentity(input: { event_id: string; session_id?: string; avatar_id?: string }) {
+  assertEventId(input.event_id);
+  const sessionId = input.session_id ?? getOrCreateChatSessionId();
+  const avatarId = isUserAvatarId(input.avatar_id) ? input.avatar_id : pickRandomUserAvatarId();
+  const baseName = getRandomInternationalFirstName().slice(0, MAX_DISPLAY_NAME);
+
+  try {
+    return await reserveGeneratedEventChatIdentity({
+      event_id: input.event_id,
+      session_id: sessionId,
+      display_name: baseName,
+      avatar_id: avatarId,
+    });
+  } catch (err) {
+    if (!(err instanceof Error) || err.message !== CHAT_NAME_TAKEN_MESSAGE) throw err;
+  }
+
+  return reserveGeneratedEventChatIdentity({
+    event_id: input.event_id,
+    session_id: sessionId,
+    display_name: suffixGeneratedName(baseName),
+    avatar_id: avatarId,
+  });
 }
 
 export async function getVisitorMessageStatus(eventId: string, messageId: string, clientToken: string) {
