@@ -2,6 +2,9 @@
 -- Safe to rerun after supabase/chat-participants-migration.sql.
 
 alter table public.event_chat_participants
+add column if not exists session_id uuid;
+
+alter table public.event_chat_participants
 add column if not exists last_seen_at timestamptz not null default now();
 
 create unique index if not exists event_chat_participants_event_session_idx
