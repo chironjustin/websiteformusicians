@@ -164,8 +164,9 @@ assert(generatedIdentityMigration.includes("from public.pick_chat_base_name(even
 assert(generatedIdentityMigration.includes("should_reassign_existing") && generatedIdentityMigration.includes("regexp_replace(existing_participant.display_name"), "Generated identity migration must repair existing synthetic participant names on the next join.");
 
 const curatedNameRepairMigration = readFileSync("supabase/chat-curated-name-flow-repair.sql", "utf8");
+assert(curatedNameRepairMigration.includes("create table if not exists public.chat_name_pool") && curatedNameRepairMigration.includes("create or replace function public.pick_chat_base_name"), "Curated-name repair migration must install the curated pool and picker when they are missing.");
 assert(curatedNameRepairMigration.includes("drop function if exists public.chat_generated_first_names()") && curatedNameRepairMigration.includes("from public.pick_chat_base_name(event_artist_name) picked"), "Curated-name repair migration must remove the legacy generator and reinstall the pool-backed join function.");
-assert(curatedNameRepairMigration.includes("should_reassign_existing") && curatedNameRepairMigration.includes("chat_name_pool_missing"), "Curated-name repair migration must repair old synthetic rows and fail clearly if the name pool has not been installed.");
+assert(curatedNameRepairMigration.includes("should_reassign_existing") && curatedNameRepairMigration.includes("regexp_replace(existing_participant.display_name"), "Curated-name repair migration must repair old synthetic rows on the next join.");
 
 const obsoleteNameFragments = [
   "prefix(value)",
