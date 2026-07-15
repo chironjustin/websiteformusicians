@@ -1681,15 +1681,10 @@ function JoinChatPanel({ eventId, onJoin }: { eventId: string; onJoin: (identity
 }
 
 const VISITOR_MESSAGE_LIMIT = 400;
+const RATE_LIMIT_MESSAGE = "Wait a little till sending again.";
 
 function getUnicodeLength(value: string) {
   return Array.from(value).length;
-}
-
-function formatCooldown(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
 function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: string; identity: JoinedChatIdentity; live: boolean; starting: boolean }) {
@@ -1718,7 +1713,10 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
     const update = () => {
       const remaining = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
       setCooldownRemaining(remaining);
-      if (remaining === 0) setCooldownUntil(0);
+      if (remaining === 0) {
+        setCooldownUntil(0);
+        setError(current => current === RATE_LIMIT_MESSAGE ? "" : current);
+      }
     };
 
     update();
@@ -1787,7 +1785,7 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
       if (err instanceof ChatSubmissionError && err.code === "MESSAGE_RATE_LIMITED" && err.retryAfterSeconds) {
         setCooldownUntil(Date.now() + err.retryAfterSeconds * 1000);
         setCooldownRemaining(err.retryAfterSeconds);
-        setError("Wait a little till sending again.");
+        setError(RATE_LIMIT_MESSAGE);
       } else if (err instanceof ChatSubmissionError) {
         setError(err.message);
       } else {
@@ -1801,9 +1799,11 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
   const trimmedLength = getUnicodeLength(body.trim());
   const isTooLong = trimmedLength > VISITOR_MESSAGE_LIMIT;
   const canSend = live && !sending && cooldownRemaining === 0 && Boolean(body.trim()) && !isTooLong;
+  const feedbackMessage = error || (pendingSubmissions.length > 0 ? "Waiting..." : "");
+  const feedbackTone = error ? "error" : "status";
 
   return (
-    <div style={{ position: "fixed", left: "clamp(0.85rem, 4vw, 1.75rem)", right: "clamp(0.85rem, 4vw, 1.75rem)", bottom: "max(1.2rem, env(safe-area-inset-bottom))", zIndex: 20 }}>
+    <div style={{ position: "fixed", left: "clamp(0.85rem, 4vw, 1.75rem)", right: "clamp(0.85rem, 4vw, 1.75rem)", bottom: 0, paddingBottom: "calc(max(1rem, env(safe-area-inset-bottom)) + 0.75rem)", zIndex: 30 }}>
       {live ? (
         <form onSubmit={submitMessage} style={{ display: "grid", gap: "0.5rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", borderTop: "1px solid rgba(0,255,65,0.1)", paddingTop: "0.7rem" }}>
@@ -1815,9 +1815,11 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
           <p style={{ fontFamily: VT, color: isTooLong ? "#ff5c5c" : "rgba(0,255,65,0.55)", fontSize: "0.85rem", textAlign: "right" }}>
             {trimmedLength} / {VISITOR_MESSAGE_LIMIT}
           </p>
-          {pendingSubmissions.length > 0 && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>Waiting...</p>}
-          {cooldownRemaining > 0 && <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem" }}>Wait a little till sending again. {formatCooldown(cooldownRemaining)}</p>}
-          {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem" }}>{error}</p>}
+          {feedbackMessage && (
+            <p role={feedbackTone === "error" ? "alert" : "status"} aria-live={feedbackTone === "error" ? "assertive" : "polite"} style={{ fontFamily: VT, color: feedbackTone === "error" ? "#ff5c5c" : GREEN, fontSize: "0.95rem", margin: 0 }}>
+              {feedbackMessage}
+            </p>
+          )}
         </form>
       ) : (
         <p style={{ fontFamily: VT, color: "rgba(255,255,255,0.45)", fontSize: "1.05rem" }}>

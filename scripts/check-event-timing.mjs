@@ -108,7 +108,8 @@ assert(publicPage.includes("VISITOR_MESSAGE_LIMIT = 400") && publicPage.includes
 assert(publicPage.includes("pendingSubmissions") && publicPage.includes("Waiting..."), "Submitted visitor messages must show Waiting while tracked rows are pending.");
 assert(publicPage.includes("pendingSubmissions.map") && publicPage.includes("getVisitorMessageStatus(eventId, submission.id, submission.clientToken)"), "Waiting state must independently check each submitted message status by event id, row id, and client token.");
 assert(!publicPage.includes("pendingSubmission)") && !publicPage.includes("8_000") && !publicPage.includes("lastSentAt"), "Visitor composer must not block new sends merely because another message is pending or because of a fixed local cooldown.");
-assert(publicPage.includes("cooldownRemaining") && publicPage.includes("Wait a little till sending again.") && publicPage.includes("formatCooldown"), "Visitor composer must show a server-provided cooldown countdown.");
+assert(publicPage.includes("cooldownRemaining") && publicPage.includes("RATE_LIMIT_MESSAGE") && !publicPage.includes("formatCooldown"), "Visitor composer must keep server-provided cooldown state without rendering a public countdown.");
+assert(publicPage.includes("feedbackMessage = error ||") && publicPage.includes('role={feedbackTone === "error" ? "alert" : "status"}'), "Visitor composer must render exactly one prioritized feedback notice.");
 assert(publicPage.includes('live={authoritativeState === "live"}'), "Public chat submission must depend on authoritative database live status.");
 
 const chatHook = readFileSync("src/hooks/useEventChat.ts", "utf8");
