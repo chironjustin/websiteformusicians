@@ -458,6 +458,7 @@ $$;
 revoke all on function public.pick_chat_base_name(text) from public;
 
 drop function if exists public.join_event_chat(uuid, uuid);
+drop function if exists public.chat_generated_first_names();
 
 create or replace function public.join_event_chat(
   p_event_id uuid,
