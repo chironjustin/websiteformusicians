@@ -6,7 +6,6 @@ import {
   ChatSubmissionError,
   joinEventChatIdentity,
   sendVisitorMessage,
-  getVisitorMessageStatus,
 } from "@/services/chatService";
 import {
   getAudioObjectPath,
@@ -932,7 +931,12 @@ export default function PublicEventPage() {
   const state = event ? getEventDisplayState(event, now) : "upcoming";
   const authoritativeState = event?.status ?? "upcoming";
   const waitingForLiveStatus = state === "live" && authoritativeState === "upcoming";
-  const chat = useEventChat(state === "live" ? event?.id : undefined, "public");
+  const [joinedIdentity, setJoinedIdentity] = useState<JoinedChatIdentity | null>(null);
+  const chatViewer = useMemo(() => joinedIdentity ? {
+    participantId: joinedIdentity.participantId,
+    sessionId: joinedIdentity.sessionId,
+  } : null, [joinedIdentity]);
+  const chat = useEventChat(state === "live" ? event?.id : undefined, "public", chatViewer);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -942,6 +946,10 @@ export default function PublicEventPage() {
   useEffect(() => {
     removeLegacyChatIdentity();
   }, []);
+
+  useEffect(() => {
+    setJoinedIdentity(event?.id ? readStoredChatIdentity(event.id) : null);
+  }, [event?.id]);
 
   useEffect(() => {
     const currentEventId = event?.id ?? null;
@@ -1513,6 +1521,9 @@ export default function PublicEventPage() {
           liveTarget={countdownTarget}
           eventId={event.id}
           messages={chat.messages}
+          joinedIdentity={joinedIdentity}
+          onJoin={setJoinedIdentity}
+          onMessageSubmitted={chat.refetch}
           live={authoritativeState === "live"}
           starting={waitingForLiveStatus}
         />
@@ -1646,13 +1657,7 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
   );
 }
 
-function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; live: boolean; starting: boolean }) {
-  const [joinedIdentity, setJoinedIdentity] = useState<JoinedChatIdentity | null>(null);
-
-  useEffect(() => {
-    setJoinedIdentity(readStoredChatIdentity(eventId));
-  }, [eventId]);
-
+function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, joinedIdentity, onJoin, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
   useEffect(() => {
     console.info("[live-chat-join-state]", {
       eventId,
@@ -1680,9 +1685,9 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
             </p>
           )}
           {joinedIdentity ? (
-            <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} />
+            <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
           ) : (
-            <JoinChatPanel eventId={eventId} onJoin={setJoinedIdentity} />
+            <JoinChatPanel eventId={eventId} onJoin={onJoin} />
           )}
         </div>
       </div>
@@ -1882,11 +1887,10 @@ function getUnicodeLength(value: string) {
   return Array.from(value).length;
 }
 
-function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: string; identity: JoinedChatIdentity; live: boolean; starting: boolean }) {
+function ActiveChatComposer({ eventId, identity, live, starting, onMessageSubmitted }: { eventId: string; identity: JoinedChatIdentity; live: boolean; starting: boolean; onMessageSubmitted: () => void | Promise<void> }) {
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
-  const [pendingSubmissions, setPendingSubmissions] = useState<Array<{ id: string; clientToken: string }>>([]);
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
@@ -1894,7 +1898,6 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
     setBody("");
     setError("");
     setSending(false);
-    setPendingSubmissions([]);
     setCooldownUntil(0);
     setCooldownRemaining(0);
   }, [eventId]);
@@ -1919,33 +1922,6 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
     return () => window.clearInterval(id);
   }, [cooldownUntil]);
 
-  useEffect(() => {
-    if (pendingSubmissions.length === 0) return;
-
-    let active = true;
-    const checkStatus = async () => {
-      const results = await Promise.allSettled(
-        pendingSubmissions.map(async submission => {
-          const status = await getVisitorMessageStatus(eventId, submission.id, submission.clientToken);
-          return { submission, status };
-        }),
-      );
-      if (!active) return;
-
-      setPendingSubmissions(current => current.filter(submission => {
-        const result = results.find(item => item.status === "fulfilled" && item.value.submission.clientToken === submission.clientToken);
-        return !result || (result.status === "fulfilled" && result.value.status === "pending");
-      }));
-    };
-
-    checkStatus();
-    const id = window.setInterval(checkStatus, 2000);
-    return () => {
-      active = false;
-      window.clearInterval(id);
-    };
-  }, [eventId, pendingSubmissions]);
-
   async function submitMessage(event: React.FormEvent) {
     event.preventDefault();
     const trimmedBody = body.trim();
@@ -1965,16 +1941,14 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
     setError("");
     try {
       const clientToken = crypto.randomUUID();
-      const message = await sendVisitorMessage({
+      await sendVisitorMessage({
         event_id: eventId,
         participant_id: identity.participantId,
         body,
         client_token: clientToken,
       });
       setBody("");
-      setPendingSubmissions(current => current.some(submission => submission.id === message.id)
-        ? current
-        : [...current, { id: message.id, clientToken }]);
+      await onMessageSubmitted();
     } catch (err) {
       console.error("Visitor chat submission failed", err);
       if (err instanceof ChatSubmissionError && err.code === "MESSAGE_RATE_LIMITED" && err.retryAfterSeconds) {
@@ -1994,7 +1968,7 @@ function ActiveChatComposer({ eventId, identity, live, starting }: { eventId: st
   const trimmedLength = getUnicodeLength(body.trim());
   const isTooLong = trimmedLength > VISITOR_MESSAGE_LIMIT;
   const canSend = live && !sending && cooldownRemaining === 0 && Boolean(body.trim()) && !isTooLong;
-  const feedbackMessage = error || (pendingSubmissions.length > 0 ? "Waiting..." : "");
+  const feedbackMessage = error;
   const feedbackTone = error ? "error" : "status";
 
   return (

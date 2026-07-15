@@ -4,15 +4,17 @@ import { getAdminChatMessages, getPublicChatMessages } from "@/services/chatServ
 import type { ChatMessage } from "@/types/chat";
 
 type ChatMode = "admin" | "public";
+type PublicChatViewer = { participantId: string; sessionId: string } | null;
 
-export function useEventChat(eventId: string | null | undefined, mode: ChatMode) {
+export function useEventChat(eventId: string | null | undefined, mode: ChatMode, viewer: PublicChatViewer = null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(Boolean(eventId));
   const [error, setError] = useState<string | null>(null);
   const activeScopeRef = useRef("");
+  const viewerKey = viewer ? `${viewer.participantId}:${viewer.sessionId}` : "";
 
   const loadMessages = useCallback(async () => {
-    const scope = `${mode}:${eventId ?? ""}`;
+    const scope = `${mode}:${eventId ?? ""}:${viewerKey}`;
     activeScopeRef.current = scope;
 
     if (!eventId) {
@@ -25,7 +27,7 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode)
       setLoading(true);
       const nextMessages = mode === "admin"
         ? await getAdminChatMessages(eventId)
-        : await getPublicChatMessages(eventId);
+        : await getPublicChatMessages(eventId, viewer);
       if (activeScopeRef.current !== scope) return;
       setMessages(nextMessages);
       setError(null);
@@ -36,14 +38,14 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode)
       if (activeScopeRef.current !== scope) return;
       setLoading(false);
     }
-  }, [eventId, mode]);
+  }, [eventId, mode, viewer, viewerKey]);
 
   useEffect(() => {
-    activeScopeRef.current = `${mode}:${eventId ?? ""}`;
+    activeScopeRef.current = `${mode}:${eventId ?? ""}:${viewerKey}`;
     setMessages([]);
     setError(null);
     setLoading(Boolean(eventId));
-  }, [eventId, mode]);
+  }, [eventId, mode, viewerKey]);
 
   useEffect(() => {
     loadMessages();

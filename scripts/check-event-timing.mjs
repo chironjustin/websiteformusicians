@@ -109,11 +109,10 @@ assert(!publicPage.includes("ChatAvatar") && !publicPage.includes("ArtistMessage
 assert(!publicPage.includes("avatarId") && !publicPage.includes("CHAT_AVATAR_KEY_PREFIX"), "Stored generated chat identities must not include avatar metadata.");
 assert(publicPage.includes("VISITOR_MESSAGE_LIMIT = 400") && publicPage.includes("getUnicodeLength(body.trim())"), "Visitor composer must count trimmed Unicode characters against the 400-character limit.");
 assert(!publicPage.includes("{trimmedLength} / {VISITOR_MESSAGE_LIMIT}"), "Visitor composer must not render a public character counter.");
-assert(publicPage.includes("pendingSubmissions") && publicPage.includes("Waiting..."), "Submitted visitor messages must show Waiting while tracked rows are pending.");
-assert(publicPage.includes("pendingSubmissions.map") && publicPage.includes("getVisitorMessageStatus(eventId, submission.id, submission.clientToken)"), "Waiting state must independently check each submitted message status by event id, row id, and client token.");
+assert(!publicPage.includes("Waiting...") && !publicPage.includes("pendingSubmissions") && !publicPage.includes("getVisitorMessageStatus"), "Visitor composer must not render or track approval-dependent Waiting state.");
 assert(!publicPage.includes("pendingSubmission)") && !publicPage.includes("8_000") && !publicPage.includes("lastSentAt"), "Visitor composer must not block new sends merely because another message is pending or because of a fixed local cooldown.");
 assert(publicPage.includes("cooldownRemaining") && publicPage.includes("RATE_LIMIT_MESSAGE") && !publicPage.includes("formatCooldown"), "Visitor composer must keep server-provided cooldown state without rendering a public countdown.");
-assert(publicPage.includes("feedbackMessage = error ||") && publicPage.includes('className="chat-composer__feedback"') && publicPage.includes('role={feedbackMessage ? feedbackTone === "error" ? "alert" : "status" : undefined}'), "Visitor composer must render exactly one prioritized feedback notice in the shared feedback row.");
+assert(publicPage.includes("feedbackMessage = error") && publicPage.includes('className="chat-composer__feedback"') && publicPage.includes('role={feedbackMessage ? feedbackTone === "error" ? "alert" : "status" : undefined}'), "Visitor composer must render only error feedback in the shared feedback row.");
 assert(publicPage.includes('live={authoritativeState === "live"}'), "Public chat submission must depend on authoritative database live status.");
 
 const chatHook = readFileSync("src/hooks/useEventChat.ts", "utf8");
@@ -122,7 +121,8 @@ assert(chatHook.includes("filter: `event_id=eq.${eventId}`"), "Realtime chat sub
 
 const chatService = readFileSync("src/services/chatService.ts", "utf8");
 assert(chatService.includes('.eq("event_id", eventId)') && chatService.includes('.eq("status", "approved")'), "Public chat query must fetch approved messages for the active event only.");
-assert(chatService.includes('supabase.rpc("submit_chat_message"') && chatService.includes("p_client_token") && chatService.includes("get_visitor_chat_message_status"), "Visitor submissions must use the scoped public RPC and pending-status lookup.");
+assert(chatService.includes('supabase.rpc("submit_chat_message"') && chatService.includes("p_client_token") && chatService.includes("get_visitor_visible_chat_messages"), "Visitor submissions must use the scoped public RPC and joined visitors must load approved plus sender-private messages.");
+assert(chatService.includes('supabase.rpc("moderate_chat_message"') && chatService.includes("p_next_status"), "Admin moderation must use the audited moderation RPC.");
 assert(chatService.includes("ChatSubmissionError") && chatService.includes("retryAfterSeconds") && chatService.includes("result.code") && chatService.includes("result.message"), "Visitor submission service must map structured server errors, including rate-limit metadata.");
 assert(chatService.includes("MAX_VISITOR_BODY = 400") && chatService.includes("unicodeLength(body) > MAX_VISITOR_BODY") && !chatService.includes("normalizeMessageText(input.body).slice"), "Visitor submission service must validate but never silently truncate 400-character messages.");
 assert(chatService.includes("joinEventChatIdentity") && chatService.includes("getOrCreateChatSessionId") && chatService.includes('supabase.rpc("join_event_chat"'), "Visitor chat names must use one-click event-scoped server-generated identity creation.");
@@ -140,6 +140,8 @@ assert(chatSchema.includes("event_id uuid references public.events") && chatSche
 assert(chatSchema.includes("chat_messages_event_status_created_idx") && chatSchema.includes("chat_messages_event_client_token_idx"), "Chat schema must include event-scoped retrieval indexes.");
 assert(chatSchema.includes("chat_messages_event_participant_client_token_idx"), "Chat schema must enforce idempotent visitor submissions by event, participant, and client token.");
 assert(chatSchema.includes("create or replace function public.submit_chat_message"), "Chat schema must provide a public pending-message submit RPC.");
+assert(chatSchema.includes("create or replace function public.get_visitor_visible_chat_messages") && chatSchema.includes("participant_id = p_participant_id"), "Chat schema must provide sender-private public message visibility.");
+assert(chatSchema.includes("create table if not exists public.chat_message_moderation_audit") && chatSchema.includes("create or replace function public.moderate_chat_message"), "Chat schema must provide audited manual moderation.");
 assert(chatSchema.includes("create table if not exists public.event_chat_participants") && chatSchema.includes("event_chat_participants_event_normalized_name_idx"), "Chat schema must enforce event-scoped temporary username uniqueness.");
 assert(chatSchema.includes("session_id uuid") && chatSchema.includes("event_chat_participants_event_session_idx"), "Chat schema must preserve generated chat identity by event and session.");
 assert(chatSchema.includes("create or replace function public.join_event_chat"), "Chat schema must generate anonymous event identities server-side.");

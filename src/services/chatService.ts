@@ -59,7 +59,18 @@ function orderedMessagesQuery() {
     .order("created_at", { ascending: true });
 }
 
-export async function getPublicChatMessages(eventId: string) {
+export async function getPublicChatMessages(eventId: string, viewer?: { participantId: string; sessionId: string } | null) {
+  if (viewer?.participantId && viewer.sessionId) {
+    const { data, error } = await supabase.rpc("get_visitor_visible_chat_messages", {
+      p_event_id: eventId,
+      p_participant_id: viewer.participantId,
+      p_session_id: viewer.sessionId,
+    });
+
+    if (error) throw new Error(error.message);
+    return (data ?? []) as ChatMessage[];
+  }
+
   const { data, error } = await orderedMessagesQuery()
     .eq("event_id", eventId)
     .eq("status", "approved")
@@ -142,17 +153,6 @@ export async function joinEventChatIdentity(input: { event_id: string; session_i
   return participant as ChatParticipant;
 }
 
-export async function getVisitorMessageStatus(eventId: string, messageId: string, clientToken: string) {
-  const { data, error } = await supabase.rpc("get_visitor_chat_message_status", {
-    message_event_id: eventId,
-    message_id: messageId,
-    message_client_token: clientToken,
-  });
-
-  if (error) throw new Error(error.message);
-  return data as ChatMessageStatus | null;
-}
-
 export async function sendAdminMessage(input: CreateAdminChatMessageInput) {
   assertEventId(input.event_id);
   const displayName = cleanText(input.display_name || "Admin", MAX_ADMIN_DISPLAY_NAME);
@@ -183,15 +183,14 @@ export async function sendAdminMessage(input: CreateAdminChatMessageInput) {
 }
 
 export async function setMessageStatus(id: string, status: ChatMessageStatus) {
-  const { data, error } = await supabase
-    .from("chat_messages")
-    .update({ status })
-    .eq("id", id)
-    .select("*")
-    .single<ChatMessage>();
+  const { data, error } = await supabase.rpc("moderate_chat_message", {
+    p_message_id: id,
+    p_next_status: status,
+    p_reason: null,
+  });
 
   if (error) throw new Error(error.message);
-  return data;
+  return data as ChatMessage;
 }
 
 export async function updateMessageFlags(id: string, flags: Partial<Pick<ChatMessage, "is_pinned" | "is_highlighted" | "is_liked">>) {

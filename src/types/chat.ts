@@ -13,6 +13,12 @@ export interface ChatMessage {
   is_pinned: boolean;
   is_highlighted: boolean;
   is_liked: boolean;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  rejected_at?: string | null;
+  rejected_by?: string | null;
+  rejection_reason?: string | null;
+  approval_source?: string | null;
   created_at: string;
   updated_at: string;
 }
