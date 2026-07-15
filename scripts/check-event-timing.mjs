@@ -146,6 +146,10 @@ assert(chatSchema.includes("create table if not exists public.chat_message_moder
 assert(chatSchema.includes("published_at timestamptz") && chatSchema.includes("chat_messages_published_at_status_check") && chatSchema.includes("set_chat_message_publication_fields"), "Chat schema must separate submission created_at from public published_at.");
 assert(chatSchema.includes("when chat_messages.participant_id = p_participant_id then chat_messages.created_at") && chatSchema.includes("else chat_messages.published_at"), "Sender-visible chat ordering must keep own messages in created_at position and order other approved messages by published_at.");
 assert(chatSchema.includes("published_at = case when p_next_status = 'approved' then v_now else null end") && chatSchema.includes("approved_at = case when p_next_status = 'approved' then v_now"), "Manual approval must assign approved_at and published_at from the same trusted database timestamp.");
+assert(chatSchema.includes("risk_level text") && chatSchema.includes("risk_score integer") && chatSchema.includes("risk_flags text[]") && chatSchema.includes("auto_publish_eligible boolean"), "Chat schema must store deterministic risk classification metadata.");
+assert(chatSchema.includes("create or replace function public.classify_chat_message") && chatSchema.includes("chat_message_risk_classifier_version") && chatSchema.includes("rules-v1"), "Chat schema must include the server-side deterministic chat risk classifier.");
+assert(chatSchema.includes("classification := public.classify_chat_message") && chatSchema.includes("status = case when classification->>'riskLevel' = 'high' then 'rejected' else 'pending' end"), "Visitor submit RPC must classify accepted messages and auto-reject only high-risk messages.");
+assert(chatSchema.includes("'message_classified'") && chatSchema.includes("'message_auto_rejected'"), "Chat moderation audit must record classification and automatic rule rejections.");
 assert(chatSchema.includes("create table if not exists public.event_chat_participants") && chatSchema.includes("event_chat_participants_event_normalized_name_idx"), "Chat schema must enforce event-scoped temporary username uniqueness.");
 assert(chatSchema.includes("session_id uuid") && chatSchema.includes("event_chat_participants_event_session_idx"), "Chat schema must preserve generated chat identity by event and session.");
 assert(chatSchema.includes("create or replace function public.join_event_chat"), "Chat schema must generate anonymous event identities server-side.");
@@ -267,6 +271,12 @@ assert(readinessMigration.includes("validate_event_public_readiness") && readine
 assert(readinessMigration.includes("artist_image_path") && readinessMigration.includes("EVENT_NOT_READY"), "Database readiness guard must require artist image and return a stable readiness error.");
 assert(readinessMigration.includes("Add a merch link or remove the merch image") && readinessMigration.includes("Add a merch image or remove the merch link") && readinessMigration.includes("^https://"), "Database readiness guard must enforce merch image/link pairing and HTTPS merch links.");
 assert(!readinessMigration.includes("Add an event title before starting the event") && !readinessMigration.includes("missing_fields := array_append(missing_fields, 'title')"), "Database readiness guard must not require event title.");
+
+const riskMigration = readFileSync("supabase/chat-risk-classification.sql", "utf8");
+assert(riskMigration.includes("add column if not exists risk_level") && riskMigration.includes("add column if not exists auto_publish_eligible"), "Risk classification migration must add risk metadata fields.");
+assert(riskMigration.includes("create or replace function public.classify_chat_message") && riskMigration.includes("CONTAINS_LINK") && riskMigration.includes("SCRIPT_PAYLOAD") && riskMigration.includes("RECENT_DUPLICATE"), "Risk classification migration must install deterministic rule flags.");
+assert(riskMigration.includes("risk_level = 'medium'") && riskMigration.includes("CLASSIFIER_FAILURE") && riskMigration.includes("auto_publish_eligible = false"), "Classifier failures must remain private and ineligible.");
+assert(!riskMigration.includes("status = case when classification->>'riskLevel' = 'low' then 'approved'") && !riskMigration.includes("published_at = clock_timestamp()"), "Step 4 must not automatically approve or publish classified messages.");
 
 const cronSql = readFileSync("supabase/event-status-cron.sql", "utf8");
 assert(cronSql.includes("status = 'upcoming'") && cronSql.includes("starts_at <= now()"), "Cron must promote due upcoming events to live.");

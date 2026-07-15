@@ -1,4 +1,5 @@
 export type ChatMessageStatus = "pending" | "approved" | "rejected";
+export type ChatRiskLevel = "low" | "medium" | "high";
 
 export interface ChatMessage {
   id: string;
@@ -19,7 +20,14 @@ export interface ChatMessage {
   rejected_at?: string | null;
   rejected_by?: string | null;
   rejection_reason?: string | null;
+  rejection_source?: string | null;
   approval_source?: string | null;
+  risk_level?: ChatRiskLevel | null;
+  risk_score?: number | null;
+  risk_flags?: string[] | null;
+  classified_at?: string | null;
+  classifier_version?: string | null;
+  auto_publish_eligible?: boolean | null;
   created_at: string;
   updated_at: string;
 }

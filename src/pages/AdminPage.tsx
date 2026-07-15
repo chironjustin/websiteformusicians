@@ -1211,6 +1211,7 @@ function ChatSection({ title, empty, messages, children }: { title: string; empt
               {message.is_admin && <span style={badgeStyle}>Admin</span>}
               {message.is_pinned && <span style={badgeStyle}>Pinned</span>}
             </div>
+            <RiskSummary message={message} />
             <p style={{ fontSize: 13, color: "#374151", overflowWrap: "anywhere" }}>{message.body}</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
               {children(message)}
@@ -1220,6 +1221,28 @@ function ChatSection({ title, empty, messages, children }: { title: string; empt
       </div>
     </Panel>
   );
+}
+
+function RiskSummary({ message }: { message: ChatMessage }) {
+  if (message.is_admin) return null;
+
+  const level = message.risk_level?.toUpperCase() ?? "UNCLASSIFIED";
+  const flags = message.risk_flags?.length ? message.risk_flags.map(formatRiskFlag).join(" · ") : "No risk flags";
+  const version = message.classifier_version ? ` · ${message.classifier_version}` : "";
+
+  return (
+    <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>
+      <strong>{level}</strong> · {flags}{version}
+    </p>
+  );
+}
+
+function formatRiskFlag(flag: string) {
+  return flag
+    .toLowerCase()
+    .split("_")
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function SmallButton({ children, onClick, disabled, color = "#6366f1" }: { children: React.ReactNode; onClick: () => void; disabled?: boolean; color?: string }) {
