@@ -15,8 +15,17 @@ revoke select, insert, update, delete on public.event_chat_participants from ano
 
 drop policy if exists "Public can read live event chat participants" on public.event_chat_participants;
 
-revoke all on function public.reserve_event_chat_identity(uuid, text, text, text) from public, anon, authenticated;
-revoke all on function public.reserve_event_chat_identity(uuid, uuid, text, text, text) from public, anon, authenticated;
+do $$
+begin
+  if to_regprocedure('public.reserve_event_chat_identity(uuid, text, text, text)') is not null then
+    revoke all on function public.reserve_event_chat_identity(uuid, text, text, text) from public, anon, authenticated;
+  end if;
+
+  if to_regprocedure('public.reserve_event_chat_identity(uuid, uuid, text, text, text)') is not null then
+    revoke all on function public.reserve_event_chat_identity(uuid, uuid, text, text, text) from public, anon, authenticated;
+  end if;
+end;
+$$;
 
 create or replace function public.chat_generated_first_names()
 returns text[]
