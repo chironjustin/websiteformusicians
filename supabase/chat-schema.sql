@@ -724,18 +724,11 @@ begin
     score := score + 20;
   end if;
 
-  if clean_body ~ '(.)\1{14,}' then
-    flags := array_append(flags, 'REPEATED_CHARACTERS');
-    force_high := true;
-  elsif clean_body ~ '(.)\1{7,}' or clean_body ~ '[!?.,]{12,}' then
-    flags := array_append(flags, 'REPEATED_CHARACTERS');
-    score := score + 20;
-  end if;
-
-  if position(U&'\200B' in clean_body) > 0
-    or position(U&'\200C' in clean_body) > 0
-    or position(U&'\200D' in clean_body) > 0
-    or position(U&'\FEFF' in clean_body) > 0 then
+  if (
+      position(U&'\200B' in clean_body) > 0
+      or position(U&'\FEFF' in clean_body) > 0
+    )
+    and clean_body ~ '[[:alnum:]]' then
     flags := array_append(flags, 'SUSPICIOUS_INVISIBLE_CHARACTERS');
     score := score + 35;
   end if;
@@ -764,11 +757,6 @@ begin
   mention_count := length(clean_body) - length(replace(clean_body, '@', ''));
   if mention_count > 5 then
     flags := array_append(flags, 'EXCESSIVE_MENTIONS');
-    score := score + 15;
-  end if;
-
-  if clean_body ~ '[!?]{10,}' then
-    flags := array_append(flags, 'EXCESSIVE_PUNCTUATION');
     score := score + 15;
   end if;
 
