@@ -1075,13 +1075,13 @@ with candidates as (
       else null
     end,
     published_at = null,
-    rejected_at = case when decisions.next_risk_level = 'high' then clock_timestamp() else rejected_at end,
-    rejection_source = case when decisions.next_risk_level = 'high' then 'automatic_rules' else rejection_source end,
-    rejection_reason = case when decisions.next_risk_level = 'high' then 'automatic_rules' else rejection_reason end,
+    rejected_at = case when decisions.next_risk_level = 'high' then clock_timestamp() else chat_messages.rejected_at end,
+    rejection_source = case when decisions.next_risk_level = 'high' then 'automatic_rules' else chat_messages.rejection_source end,
+    rejection_reason = case when decisions.next_risk_level = 'high' then 'automatic_rules' else chat_messages.rejection_reason end,
     last_queue_error = case
       when decisions.status = 'queued' and not decisions.next_queue_eligible then 'queue_eligibility_revoked'
       when decisions.status = 'queued' and decisions.next_queue_eligible then null
-      else last_queue_error
+      else chat_messages.last_queue_error
     end
   from decisions
   where chat_messages.id = decisions.id
