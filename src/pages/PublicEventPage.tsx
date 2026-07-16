@@ -193,20 +193,12 @@ function GlobalStyles() {
     .live-chat__pinned {
       flex: 0 0 auto;
       margin: 0 0 0.75rem;
-      padding: 0.55rem 0.65rem 0.6rem;
+      padding: 0.65rem;
       border: 1px solid rgba(0,255,65,0.22);
       border-left: 2px solid ${GREEN};
       background: rgba(0,255,65,0.055);
       max-height: clamp(5.75rem, 16vh, 8.5rem);
       overflow: hidden;
-    }
-    .live-chat__pinned-label {
-      margin: 0 0 0.35rem;
-      font-family: ${VT};
-      color: rgba(0,255,65,0.66);
-      font-size: 0.86rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
     }
     .live-chat__messages {
       flex: 1 1 auto;
@@ -1880,7 +1872,6 @@ function LiveMessageStream({ messages, eventId, artistName, artistUrl, listenerC
 function PinnedMessageArea({ message, artistName, artistUrl }: { message: ChatMessage; artistName: string; artistUrl: string }) {
   return (
     <aside className="live-chat__pinned" aria-label="Pinned message">
-      <p className="live-chat__pinned-label">Pinned message</p>
       <ChatMessageBubble message={message} artistName={artistName} artistUrl={artistUrl} pinnedArea />
     </aside>
   );
