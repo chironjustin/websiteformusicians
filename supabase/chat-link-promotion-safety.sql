@@ -183,12 +183,12 @@ begin
     force_high := true;
   end if;
 
-  if comparison_body ~ '(you suck|you(''re| are|re) (annoying|stupid|an idiot|idiot|trash)|i hate you|nobody likes you|what an idiot)' then
+  if comparison_body ~ '(fuck you|shut the fuck up|you suck|you fucking suck|you(''re| are|re) (annoying|stupid|a fucking idiot|an idiot|idiot|trash)|i hate you|nobody likes you|what an idiot)' then
     flags := array_append(flags, 'PERSONAL_ATTACK');
     score := score + 30;
   end if;
 
-  if comparison_body ~ '(this artist sucks|the artist sucks|artist is trash|this artist is trash|worst singer ever|the singer is terrible|singer is terrible|the performer is terrible|performer is trash)'
+  if comparison_body ~ '(this artist sucks|the artist sucks|artist is trash|artist is fucking trash|this artist is trash|this artist is fucking trash|worst singer ever|the singer is terrible|singer is terrible|the performer is terrible|performer is trash)'
     or (
       coalesce(event_artist_name, '') <> ''
       and (
@@ -235,7 +235,7 @@ begin
       if term_record.risk = 'hard' then
         force_high := true;
       elsif term_record.flag = 'PROFANITY' then
-        score := score + 20;
+        score := score + 5;
       else
         score := score + 25;
       end if;
@@ -1109,6 +1109,115 @@ where not exists (
   from public.chat_message_moderation_audit existing_audit
   where existing_audit.message_id = reclassified.id
     and existing_audit.reason = 'link_social_promotion_safety_repair'
+    and existing_audit.previous_status = reclassified.previous_status
+    and existing_audit.new_status = reclassified.status
+);
+
+with candidates as (
+  select chat_messages.*
+  from public.chat_messages
+  where status in ('pending', 'queued')
+    and is_admin = false
+    and coalesce(risk_flags, array[]::text[]) && array[
+      'PROFANITY',
+      'SUSPICIOUS_INVISIBLE_CHARACTERS'
+    ]::text[]
+), classified as (
+  select
+    candidates.*,
+    classification.result,
+    coalesce(ARRAY(SELECT jsonb_array_elements_text(classification.result->'riskFlags')), array[]::text[]) as next_risk_flags,
+    classification.result->>'riskLevel' as next_risk_level,
+    (classification.result->>'riskScore')::integer as next_risk_score,
+    classification.result->>'classifierVersion' as next_classifier_version
+  from candidates
+  cross join lateral (
+    select public.classify_chat_message(candidates.event_id, candidates.participant_id, candidates.id, candidates.body) as result
+  ) classification
+), decisions as (
+  select
+    classified.*,
+    (
+      next_risk_level = 'low'
+      and not (
+        next_risk_flags && array[
+          'CONTAINS_LINK',
+          'OBFUSCATED_LINK',
+          'UNSAFE_PROTOCOL',
+          'SOCIAL_PROMOTION',
+          'FOLLOW_SOLICITATION',
+          'CONTACT_SOLICITATION',
+          'SOCIAL_HANDLE',
+          'CLASSIFIER_FAILURE'
+        ]::text[]
+      )
+    ) as next_queue_eligible
+  from classified
+), reclassified as (
+  update public.chat_messages
+  set
+    risk_level = decisions.next_risk_level,
+    risk_score = decisions.next_risk_score,
+    risk_flags = decisions.next_risk_flags,
+    classified_at = clock_timestamp(),
+    classifier_version = decisions.next_classifier_version,
+    auto_publish_eligible = decisions.next_queue_eligible,
+    status = case
+      when decisions.next_risk_level = 'high' then 'rejected'
+      when decisions.status = 'queued' and decisions.next_queue_eligible then 'queued'
+      else 'pending'
+    end,
+    queued_at = case
+      when decisions.status = 'queued' and decisions.next_queue_eligible then coalesce(decisions.queued_at, clock_timestamp())
+      else null
+    end,
+    published_at = null,
+    rejected_at = case when decisions.next_risk_level = 'high' then clock_timestamp() else chat_messages.rejected_at end,
+    rejection_source = case when decisions.next_risk_level = 'high' then 'automatic_rules' else chat_messages.rejection_source end,
+    rejection_reason = case when decisions.next_risk_level = 'high' then 'automatic_rules' else chat_messages.rejection_reason end,
+    last_queue_error = case
+      when decisions.status = 'queued' and not decisions.next_queue_eligible then 'queue_eligibility_revoked'
+      when decisions.status = 'queued' and decisions.next_queue_eligible then null
+      else chat_messages.last_queue_error
+    end
+  from decisions
+  where chat_messages.id = decisions.id
+  returning chat_messages.*, decisions.status as previous_status
+)
+insert into public.chat_message_moderation_audit (
+  event_id,
+  message_id,
+  participant_id,
+  actor_id,
+  action,
+  previous_status,
+  new_status,
+  reason,
+  risk_level,
+  risk_flags,
+  classifier_version
+)
+select
+  reclassified.event_id,
+  reclassified.id,
+  reclassified.participant_id,
+  null,
+  case
+    when reclassified.previous_status = 'queued' and reclassified.status <> 'queued' then 'queue_eligibility_revoked'
+    else 'message_classified'
+  end,
+  reclassified.previous_status,
+  reclassified.status,
+  'fan_excitation_classifier_repair',
+  reclassified.risk_level,
+  reclassified.risk_flags,
+  reclassified.classifier_version
+from reclassified
+where not exists (
+  select 1
+  from public.chat_message_moderation_audit existing_audit
+  where existing_audit.message_id = reclassified.id
+    and existing_audit.reason = 'fan_excitation_classifier_repair'
     and existing_audit.previous_status = reclassified.previous_status
     and existing_audit.new_status = reclassified.status
 );

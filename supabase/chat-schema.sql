@@ -772,12 +772,12 @@ begin
     force_high := true;
   end if;
 
-  if comparison_body ~ '(you suck|you(''re| are|re) (annoying|stupid|an idiot|idiot|trash)|i hate you|nobody likes you|what an idiot)' then
+  if comparison_body ~ '(fuck you|shut the fuck up|you suck|you fucking suck|you(''re| are|re) (annoying|stupid|a fucking idiot|an idiot|idiot|trash)|i hate you|nobody likes you|what an idiot)' then
     flags := array_append(flags, 'PERSONAL_ATTACK');
     score := score + 30;
   end if;
 
-  if comparison_body ~ '(this artist sucks|the artist sucks|artist is trash|this artist is trash|worst singer ever|the singer is terrible|singer is terrible|the performer is terrible|performer is trash)'
+  if comparison_body ~ '(this artist sucks|the artist sucks|artist is trash|artist is fucking trash|this artist is trash|this artist is fucking trash|worst singer ever|the singer is terrible|singer is terrible|the performer is terrible|performer is trash)'
     or (
       coalesce(event_artist_name, '') <> ''
       and (
@@ -824,7 +824,7 @@ begin
       if term_record.risk = 'hard' then
         force_high := true;
       elsif term_record.flag = 'PROFANITY' then
-        score := score + 20;
+        score := score + 5;
       else
         score := score + 25;
       end if;
