@@ -197,6 +197,11 @@ begin
     score := score + 20;
   end if;
 
+  if clean_body ~ '(.)\1{24,}' or clean_body ~ '[!?.,]{40,}' then
+    flags := array_append(flags, 'REPEATED_CHARACTERS');
+    score := score + 20;
+  end if;
+
   if (
       position(U&'\200B' in clean_body) > 0
       or position(U&'\FEFF' in clean_body) > 0
@@ -297,7 +302,7 @@ begin
       if term_record.risk = 'hard' then
         force_high := true;
       elsif term_record.flag = 'PROFANITY' then
-        score := score + 5;
+        score := score + 0;
       else
         score := score + 25;
       end if;
@@ -323,6 +328,37 @@ begin
   end if;
 
   score := least(score, 100);
+
+  if not force_high
+    and not (
+      flags && array[
+        'CONTAINS_LINK',
+        'FOLLOW_SOLICITATION',
+        'CONTACT_SOLICITATION',
+        'SOCIAL_PROMOTION',
+        'SOCIAL_HANDLE',
+        'OBFUSCATED_LINK',
+        'UNSAFE_PROTOCOL',
+        'SCRIPT_PAYLOAD',
+        'HTML_MARKUP',
+        'SUSPICIOUS_INVISIBLE_CHARACTERS',
+        'BIDI_CONTROL_ABUSE',
+        'REPEATED_CHARACTERS',
+        'EXCESSIVE_LINES',
+        'LONG_UNBROKEN_TOKEN',
+        'EXCESSIVE_MENTIONS',
+        'PERSONAL_ATTACK',
+        'HARASSMENT',
+        'THREAT',
+        'ARTIST_IMPERSONATION',
+        'ADMIN_IMPERSONATION',
+        'RECENT_DUPLICATE',
+        'REPEATED_DUPLICATE',
+        'HATE_SPEECH'
+      ]::text[]
+    ) then
+    score := least(score, 19);
+  end if;
 
   if force_high or score >= 60 then
     risk_level := 'high';
