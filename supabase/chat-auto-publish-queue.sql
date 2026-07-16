@@ -96,6 +96,27 @@ $$;
 revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from public;
 revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from anon, authenticated;
 
+create or replace function public.chat_message_public_submission_payload(p_message public.chat_messages)
+returns jsonb
+language sql
+stable
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'id', p_message.id,
+    'event_id', p_message.event_id,
+    'participant_id', p_message.participant_id,
+    'display_name', p_message.display_name,
+    'body', p_message.body,
+    'status', p_message.status,
+    'client_token', p_message.client_token,
+    'created_at', p_message.created_at,
+    'published_at', p_message.published_at
+  );
+$$;
+
+revoke all on function public.chat_message_public_submission_payload(public.chat_messages) from public, anon, authenticated;
+
 alter table public.chat_message_moderation_audit
 alter column message_id drop not null;
 
@@ -123,6 +144,7 @@ check (
 create or replace function public.submit_chat_message(
   p_event_id uuid,
   p_participant_id uuid,
+  p_session_id uuid,
   p_body text,
   p_client_token uuid
 )
@@ -156,6 +178,10 @@ begin
     return jsonb_build_object('ok', false, 'code', 'INVALID_PARTICIPANT', 'message', 'A reserved chat identity is required.');
   end if;
 
+  if p_session_id is null then
+    return jsonb_build_object('ok', false, 'code', 'INVALID_PARTICIPANT_SESSION', 'message', 'Your chat session could not be verified.');
+  end if;
+
   if coalesce(p_body, '') ~ '[[:cntrl:]]' then
     return jsonb_build_object('ok', false, 'code', 'MESSAGE_INVALID_CHARACTERS', 'message', 'Message contains unsupported characters.');
   end if;
@@ -185,10 +211,11 @@ begin
   into participant
   from public.event_chat_participants
   where event_chat_participants.id = p_participant_id
-    and event_chat_participants.event_id = p_event_id;
+    and event_chat_participants.event_id = p_event_id
+    and event_chat_participants.session_id = p_session_id;
 
   if participant.id is null then
-    return jsonb_build_object('ok', false, 'code', 'INVALID_PARTICIPANT', 'message', 'A reserved chat identity is required.');
+    return jsonb_build_object('ok', false, 'code', 'INVALID_PARTICIPANT_SESSION', 'message', 'Your chat session could not be verified.');
   end if;
 
   perform pg_advisory_xact_lock(hashtext(p_event_id::text || ':' || p_participant_id::text));
@@ -202,7 +229,7 @@ begin
   limit 1;
 
   if existing_message.id is not null then
-    return jsonb_build_object('ok', true, 'duplicate', true, 'message', to_jsonb(existing_message));
+    return jsonb_build_object('ok', true, 'duplicate', true, 'message', public.chat_message_public_submission_payload(existing_message));
   end if;
 
   select count(*)::integer, min(created_at)
@@ -274,7 +301,7 @@ begin
       limit 1;
 
       if existing_message.id is not null then
-        return jsonb_build_object('ok', true, 'duplicate', true, 'message', to_jsonb(existing_message));
+        return jsonb_build_object('ok', true, 'duplicate', true, 'message', public.chat_message_public_submission_payload(existing_message));
       end if;
 
       raise;
@@ -447,12 +474,14 @@ begin
       returning * into inserted_message;
   end;
 
-  return jsonb_build_object('ok', true, 'duplicate', false, 'message', to_jsonb(inserted_message));
+  return jsonb_build_object('ok', true, 'duplicate', false, 'message', public.chat_message_public_submission_payload(inserted_message));
 end;
 $$;
 
 revoke all on function public.submit_chat_message(uuid, uuid, text, uuid) from public;
-grant execute on function public.submit_chat_message(uuid, uuid, text, uuid) to anon, authenticated;
+revoke all on function public.submit_chat_message(uuid, uuid, text, uuid) from anon, authenticated;
+revoke all on function public.submit_chat_message(uuid, uuid, uuid, text, uuid) from public;
+grant execute on function public.submit_chat_message(uuid, uuid, uuid, text, uuid) to anon, authenticated;
 
 create or replace function public.moderate_chat_message(
   p_message_id uuid,

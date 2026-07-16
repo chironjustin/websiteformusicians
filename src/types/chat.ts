@@ -36,6 +36,11 @@ export interface ChatMessage {
   updated_at: string;
 }
 
+export type VisitorSubmittedChatMessage = Pick<
+  ChatMessage,
+  "id" | "event_id" | "participant_id" | "display_name" | "body" | "status" | "client_token" | "created_at" | "published_at"
+>;
+
 export interface ChatParticipant {
   id: string;
   event_id: string;
@@ -49,6 +54,7 @@ export interface ChatParticipant {
 export interface CreateVisitorChatMessageInput {
   event_id: string;
   participant_id: string;
+  session_id: string;
   body: string;
   client_token?: string;
 }

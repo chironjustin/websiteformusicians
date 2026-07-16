@@ -1944,6 +1944,7 @@ function ActiveChatComposer({ eventId, identity, live, starting, onMessageSubmit
       await sendVisitorMessage({
         event_id: eventId,
         participant_id: identity.participantId,
+        session_id: identity.sessionId,
         body,
         client_token: clientToken,
       });

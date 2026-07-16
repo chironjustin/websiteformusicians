@@ -97,15 +97,6 @@ begin
     score := score + 25;
   end if;
 
-  if comparison_body ~ '(^|[[:space:][:punct:]])@[a-z0-9][a-z0-9._]{1,28}[a-z0-9]([^a-z0-9._]|$)'
-    and (
-      comparison_body ~ '(follow|dm|message|contact|add|subscribe|join|check|profile|account|insta|instagram|ig|tiktok|tik tok|twitter|snapchat|snap|discord|telegram|twitch|youtube|yt|soundcloud|spotify|facebook|fb)'
-      or mention_count > 1
-    ) then
-    flags := array_append(flags, 'SOCIAL_HANDLE');
-    score := score + 15;
-  end if;
-
   if comparison_body ~ '(follow me|follow my|follow @[a-z0-9_\.]|follow [a-z0-9_\.]*|subscribe to me|subscribe to my|check my page|check my profile|check out my account|check my account)' then
     flags := array_append(flags, 'FOLLOW_SOLICITATION');
     score := score + 25;
@@ -117,9 +108,18 @@ begin
   end if;
 
   if comparison_body ~ '(follow|subscribe|dm|message|contact|add me|join|check my|my (insta|instagram|ig|snap|snapchat|telegram))'
-    and comparison_body ~ '(instagram|insta|ig|tiktok|tik tok|twitter|snapchat|snap|discord|telegram|twitch|youtube|yt|soundcloud|spotify|facebook|fb|@[a-z0-9])' then
+    and comparison_body ~ '(^|[^a-z0-9])(instagram|insta|ig|tiktok|tik tok|twitter|snapchat|snap|discord|telegram|twitch|youtube|yt|soundcloud|spotify|facebook|fb)([^a-z0-9]|$)|@[a-z0-9]' then
     flags := array_append(flags, 'SOCIAL_PROMOTION');
     score := score + 10;
+  end if;
+
+  if comparison_body ~ '(^|[[:space:][:punct:]])@[a-z0-9][a-z0-9._]{1,28}[a-z0-9]([^a-z0-9._]|$)'
+    and (
+      comparison_body ~ '(follow me|follow my|follow @[a-z0-9_\.]|subscribe to me|subscribe to my|dm me|dm @[a-z0-9_\.]|message me|message me on|contact me|add me|add me on|send me a dm|hit me up|join my|check my page|check my profile|check out my account|check my account|my insta is|my instagram is|my ig is|my snap is|my snapchat is|my telegram is)'
+      or comparison_body ~ '(^|[^a-z0-9])(instagram|insta|ig|tiktok|tik tok|twitter|snapchat|snap|discord|telegram|twitch|youtube|yt|soundcloud|spotify|facebook|fb)([^a-z0-9]|$)'
+    ) then
+    flags := array_append(flags, 'SOCIAL_HANDLE');
+    score := score + 15;
   end if;
 
   if clean_body ~* '([a-z0-9-]+\s*(\[dot\]|\(dot\)| dot )\s*[a-z]{2,})' then
@@ -324,10 +324,31 @@ $$;
 revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from public;
 revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from anon, authenticated;
 
+create or replace function public.chat_message_public_submission_payload(p_message public.chat_messages)
+returns jsonb
+language sql
+stable
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'id', p_message.id,
+    'event_id', p_message.event_id,
+    'participant_id', p_message.participant_id,
+    'display_name', p_message.display_name,
+    'body', p_message.body,
+    'status', p_message.status,
+    'client_token', p_message.client_token,
+    'created_at', p_message.created_at,
+    'published_at', p_message.published_at
+  );
+$$;
+
+revoke all on function public.chat_message_public_submission_payload(public.chat_messages) from public, anon, authenticated;
 
 create or replace function public.submit_chat_message(
   p_event_id uuid,
   p_participant_id uuid,
+  p_session_id uuid,
   p_body text,
   p_client_token uuid
 )
@@ -361,6 +382,10 @@ begin
     return jsonb_build_object('ok', false, 'code', 'INVALID_PARTICIPANT', 'message', 'A reserved chat identity is required.');
   end if;
 
+  if p_session_id is null then
+    return jsonb_build_object('ok', false, 'code', 'INVALID_PARTICIPANT_SESSION', 'message', 'Your chat session could not be verified.');
+  end if;
+
   if coalesce(p_body, '') ~ '[[:cntrl:]]' then
     return jsonb_build_object('ok', false, 'code', 'MESSAGE_INVALID_CHARACTERS', 'message', 'Message contains unsupported characters.');
   end if;
@@ -390,10 +415,11 @@ begin
   into participant
   from public.event_chat_participants
   where event_chat_participants.id = p_participant_id
-    and event_chat_participants.event_id = p_event_id;
+    and event_chat_participants.event_id = p_event_id
+    and event_chat_participants.session_id = p_session_id;
 
   if participant.id is null then
-    return jsonb_build_object('ok', false, 'code', 'INVALID_PARTICIPANT', 'message', 'A reserved chat identity is required.');
+    return jsonb_build_object('ok', false, 'code', 'INVALID_PARTICIPANT_SESSION', 'message', 'Your chat session could not be verified.');
   end if;
 
   perform pg_advisory_xact_lock(hashtext(p_event_id::text || ':' || p_participant_id::text));
@@ -407,7 +433,7 @@ begin
   limit 1;
 
   if existing_message.id is not null then
-    return jsonb_build_object('ok', true, 'duplicate', true, 'message', to_jsonb(existing_message));
+    return jsonb_build_object('ok', true, 'duplicate', true, 'message', public.chat_message_public_submission_payload(existing_message));
   end if;
 
   select count(*)::integer, min(created_at)
@@ -479,7 +505,7 @@ begin
       limit 1;
 
       if existing_message.id is not null then
-        return jsonb_build_object('ok', true, 'duplicate', true, 'message', to_jsonb(existing_message));
+        return jsonb_build_object('ok', true, 'duplicate', true, 'message', public.chat_message_public_submission_payload(existing_message));
       end if;
 
       raise;
@@ -652,12 +678,14 @@ begin
       returning * into inserted_message;
   end;
 
-  return jsonb_build_object('ok', true, 'duplicate', false, 'message', to_jsonb(inserted_message));
+  return jsonb_build_object('ok', true, 'duplicate', false, 'message', public.chat_message_public_submission_payload(inserted_message));
 end;
 $$;
 
 revoke all on function public.submit_chat_message(uuid, uuid, text, uuid) from public;
-grant execute on function public.submit_chat_message(uuid, uuid, text, uuid) to anon, authenticated;
+revoke all on function public.submit_chat_message(uuid, uuid, text, uuid) from anon, authenticated;
+revoke all on function public.submit_chat_message(uuid, uuid, uuid, text, uuid) from public;
+grant execute on function public.submit_chat_message(uuid, uuid, uuid, text, uuid) to anon, authenticated;
 
 
 create or replace function public.process_chat_auto_publish_queue(p_event_id uuid default null)

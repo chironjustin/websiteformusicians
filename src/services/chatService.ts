@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import type { ChatMessage, ChatMessageStatus, ChatParticipant, CreateAdminChatMessageInput, CreateVisitorChatMessageInput } from "@/types/chat";
+import type { ChatMessage, ChatMessageStatus, ChatParticipant, CreateAdminChatMessageInput, CreateVisitorChatMessageInput, VisitorSubmittedChatMessage } from "@/types/chat";
 
 const CHAT_SESSION_KEY = "music-event-chat-session-id";
 const MAX_ADMIN_DISPLAY_NAME = 50;
@@ -19,7 +19,7 @@ export class ChatSubmissionError extends Error {
 }
 
 type SubmitChatMessageResult =
-  | { ok: true; message: ChatMessage; duplicate?: boolean }
+  | { ok: true; message: VisitorSubmittedChatMessage; duplicate?: boolean }
   | { ok: false; code?: string; message?: string; retryAfterSeconds?: number };
 
 function cleanText(value: string, maxLength: number) {
@@ -106,12 +106,14 @@ export async function sendVisitorMessage(input: CreateVisitorChatMessageInput) {
     throw new ChatSubmissionError("MESSAGE_TOO_LONG", "Message must be 400 characters or fewer.");
   }
   if (!input.participant_id) throw new Error("A reserved chat identity is required.");
+  if (!input.session_id) throw new Error("A verified chat session is required.");
 
   const { data, error } = await supabase.rpc("submit_chat_message", {
     p_body: body,
     p_client_token: clientToken,
     p_event_id: input.event_id,
     p_participant_id: input.participant_id,
+    p_session_id: input.session_id,
   });
 
   if (error) throw new Error(error.message);
