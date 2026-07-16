@@ -141,6 +141,8 @@ check (
   )
 );
 
+drop function if exists public.submit_chat_message(uuid, uuid, text, uuid);
+
 create or replace function public.submit_chat_message(
   p_event_id uuid,
   p_participant_id uuid,
@@ -478,10 +480,9 @@ begin
 end;
 $$;
 
-revoke all on function public.submit_chat_message(uuid, uuid, text, uuid) from public;
-revoke all on function public.submit_chat_message(uuid, uuid, text, uuid) from anon, authenticated;
 revoke all on function public.submit_chat_message(uuid, uuid, uuid, text, uuid) from public;
 grant execute on function public.submit_chat_message(uuid, uuid, uuid, text, uuid) to anon, authenticated;
+drop function if exists public.submit_chat_message(uuid, uuid, text, uuid);
 
 create or replace function public.moderate_chat_message(
   p_message_id uuid,

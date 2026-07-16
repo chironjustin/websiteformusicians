@@ -159,7 +159,7 @@ begin
     score := score + 25;
   end if;
 
-  if comparison_body ~ '(follow me|follow my|follow @[a-z0-9_\.]|follow [a-z0-9_\.]*|subscribe to me|subscribe to my|check my page|check my profile|check out my account|check my account)' then
+  if comparison_body ~ '(follow me|follow my|follow @[a-z0-9_\.]|subscribe to me|subscribe to my|check my page|check my profile|check out my account|check my account)' then
     flags := array_append(flags, 'FOLLOW_SOLICITATION');
     score := score + 25;
   end if;
@@ -169,7 +169,7 @@ begin
     score := score + 25;
   end if;
 
-  if comparison_body ~ '(follow|subscribe|dm|message|contact|add me|join|check my|my (insta|instagram|ig|snap|snapchat|telegram))'
+  if comparison_body ~ '(follow me|follow my|follow @[a-z0-9_\.]|subscribe to me|subscribe to my|dm me|dm @[a-z0-9_\.]|message me|message me on|contact me|add me|add me on|send me a dm|hit me up|join my|check my page|check my profile|check out my account|check my account|my (insta|instagram|ig|snap|snapchat|telegram) is)'
     and comparison_body ~ '(^|[^a-z0-9])(instagram|insta|ig|tiktok|tik tok|twitter|snapchat|snap|discord|telegram|twitch|youtube|yt|soundcloud|spotify|facebook|fb)([^a-z0-9]|$)|@[a-z0-9]' then
     flags := array_append(flags, 'SOCIAL_PROMOTION');
     score := score + 10;
@@ -643,10 +643,9 @@ begin
 end;
 $$;
 
-revoke all on function public.submit_chat_message(uuid, uuid, text, uuid) from public;
-revoke all on function public.submit_chat_message(uuid, uuid, text, uuid) from anon, authenticated;
 revoke all on function public.submit_chat_message(uuid, uuid, uuid, text, uuid) from public;
 grant execute on function public.submit_chat_message(uuid, uuid, uuid, text, uuid) to anon, authenticated;
+drop function if exists public.submit_chat_message(uuid, uuid, text, uuid);
 
 create or replace function public.moderate_chat_message(
   p_message_id uuid,
