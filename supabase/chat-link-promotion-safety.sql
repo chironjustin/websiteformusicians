@@ -22,6 +22,26 @@ check (
   )
 );
 
+alter table public.chat_message_moderation_audit enable row level security;
+revoke all on table public.chat_message_moderation_audit from anon, authenticated;
+
+drop policy if exists "Owners can read chat moderation audit rows" on public.chat_message_moderation_audit;
+create policy "Owners can read chat moderation audit rows"
+on public.chat_message_moderation_audit
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.events
+    where events.id = chat_message_moderation_audit.event_id
+      and events.owner_id = auth.uid()
+  )
+);
+
+alter table public.chat_risk_terms enable row level security;
+revoke select, insert, update, delete, truncate on table public.chat_risk_terms from anon, authenticated;
+
 alter table public.chat_messages
 drop constraint if exists chat_messages_queue_state_check;
 
@@ -806,7 +826,7 @@ end;
 $$;
 
 revoke all on function public.process_chat_auto_publish_queue(uuid) from public;
-grant execute on function public.process_chat_auto_publish_queue(uuid) to authenticated;
+revoke all on function public.process_chat_auto_publish_queue(uuid) from anon, authenticated;
 
 drop function if exists public.run_chat_auto_publish_queue_for_minute();
 
@@ -820,7 +840,7 @@ as $$
 $$;
 
 revoke all on function public.process_chat_publish_queue(uuid) from public;
-grant execute on function public.process_chat_publish_queue(uuid) to authenticated;
+revoke all on function public.process_chat_publish_queue(uuid) from anon, authenticated;
 
 create extension if not exists pg_cron with schema extensions;
 
@@ -857,6 +877,36 @@ select cron.schedule(
 -- from cron.job
 -- where jobname like '%chat%publish%queue%';
 -- Expected: exactly one active row named process-chat-publish-queue with schedule 3 seconds.
+--
+-- Check RLS:
+-- select c.relname, c.relrowsecurity
+-- from pg_class c
+-- join pg_namespace n on n.oid = c.relnamespace
+-- where n.nspname = 'public'
+--   and c.relname in ('chat_message_moderation_audit', 'chat_risk_terms');
+-- Expected: relrowsecurity = true for both rows.
+--
+-- Check table privileges:
+-- select table_name, grantee, privilege_type
+-- from information_schema.role_table_grants
+-- where table_schema = 'public'
+--   and table_name in ('chat_message_moderation_audit', 'chat_risk_terms')
+-- order by table_name, grantee, privilege_type;
+-- Expected: no broad audit-table write access and no public risk-term access for anon/authenticated.
+--
+-- Check function privileges:
+-- select routine_name, grantee, privilege_type
+-- from information_schema.routine_privileges
+-- where routine_schema = 'public'
+--   and routine_name in ('process_chat_auto_publish_queue', 'process_chat_publish_queue', 'submit_chat_message')
+-- order by routine_name, grantee;
+-- Expected: no anon/authenticated EXECUTE on worker functions; submit_chat_message remains executable by anon/authenticated.
+--
+-- Check cron:
+-- select jobid, jobname, schedule, command, active
+-- from cron.job
+-- where jobname = 'process-chat-publish-queue';
+-- Expected: exactly one active row, schedule 3 seconds.
 
 with revoked as (
   update public.chat_messages

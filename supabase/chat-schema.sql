@@ -137,6 +137,23 @@ create table if not exists public.chat_message_moderation_audit (
 create index if not exists chat_message_moderation_audit_event_created_idx
 on public.chat_message_moderation_audit(event_id, created_at desc);
 
+alter table public.chat_message_moderation_audit enable row level security;
+revoke all on table public.chat_message_moderation_audit from anon, authenticated;
+
+drop policy if exists "Owners can read chat moderation audit rows" on public.chat_message_moderation_audit;
+create policy "Owners can read chat moderation audit rows"
+on public.chat_message_moderation_audit
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.events
+    where events.id = chat_message_moderation_audit.event_id
+      and events.owner_id = auth.uid()
+  )
+);
+
 with ranked_pins as (
   select
     id,
@@ -569,7 +586,7 @@ create unique index if not exists chat_risk_terms_normalized_mode_risk_idx
 on public.chat_risk_terms(normalized_term, match_mode, risk, flag);
 
 alter table public.chat_risk_terms enable row level security;
-revoke select, insert, update, delete on public.chat_risk_terms from anon, authenticated;
+revoke select, insert, update, delete, truncate on public.chat_risk_terms from anon, authenticated;
 
 insert into public.chat_risk_terms (term, normalized_term, match_mode, risk, flag)
 values
@@ -1732,7 +1749,7 @@ end;
 $$;
 
 revoke all on function public.process_chat_auto_publish_queue(uuid) from public;
-grant execute on function public.process_chat_auto_publish_queue(uuid) to authenticated;
+revoke all on function public.process_chat_auto_publish_queue(uuid) from anon, authenticated;
 
 drop function if exists public.run_chat_auto_publish_queue_for_minute();
 
@@ -1746,7 +1763,7 @@ as $$
 $$;
 
 revoke all on function public.process_chat_publish_queue(uuid) from public;
-grant execute on function public.process_chat_publish_queue(uuid) to authenticated;
+revoke all on function public.process_chat_publish_queue(uuid) from anon, authenticated;
 
 create extension if not exists pg_cron with schema extensions;
 
