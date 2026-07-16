@@ -71,19 +71,10 @@ declare
   score integer := 0;
   flags text[] := array[]::text[];
   force_high boolean := false;
-  duplicate_count integer := 0;
-  alpha_count integer := 0;
-  upper_count integer := 0;
   mention_count integer := 0;
   term_record record;
   risk_level text;
-  event_artist_name text := '';
 begin
-  select public.normalize_chat_body_for_risk(artist_name)
-  into event_artist_name
-  from public.events
-  where id = p_event_id;
-
   mention_count := length(clean_body) - length(replace(clean_body, '@', ''));
 
   if clean_body ~* '(javascript|data|file)\s*:' then
@@ -148,29 +139,6 @@ begin
     force_high := true;
   end if;
 
-  if comparison_body ~ '(fuck you|shut the fuck up|you suck|you fucking suck|you(''re| are|re) (annoying|stupid|a fucking idiot|an idiot|idiot|trash)|i hate you|nobody likes you|what an idiot)' then
-    flags := array_append(flags, 'PERSONAL_ATTACK');
-    score := score + 30;
-  end if;
-
-  if comparison_body ~ '(this artist sucks|the artist sucks|artist is trash|artist is fucking trash|this artist is trash|this artist is fucking trash|worst singer ever|the singer is terrible|singer is terrible|the performer is terrible|performer is trash)'
-    or (
-      coalesce(event_artist_name, '') <> ''
-      and (
-        position(event_artist_name || ' sucks' in comparison_body) > 0
-        or position(event_artist_name || ' is trash' in comparison_body) > 0
-        or position(event_artist_name || ' is terrible' in comparison_body) > 0
-      )
-    ) then
-    flags := array_append(flags, 'HARASSMENT');
-    score := score + 30;
-  end if;
-
-  if comparison_body ~ '(you suck|you(''re| are|re) (annoying|stupid|an idiot|idiot|trash)|i hate you|nobody likes you)'
-    and comparison_body ~ '(fuck|shit|bitch|asshole)' then
-    score := score + 15;
-  end if;
-
   if comparison_body ~ '(i am|i''m|im)\s+(the\s+)?official\s+artist'
     or comparison_body ~ 'official\s+artist\s+announcement' then
     flags := array_append(flags, 'ARTIST_IMPERSONATION');
@@ -202,68 +170,33 @@ begin
       and comparison_body ~ ('(^|[^[:alnum:]_])' || term_record.normalized_term || '([^[:alnum:]_]|$)')
     ) then
       flags := array_append(flags, term_record.flag);
-      if term_record.risk = 'hard' then
+      if term_record.risk = 'hard'
+        or term_record.flag in ('ADMIN_IMPERSONATION', 'ARTIST_IMPERSONATION', 'SCAM') then
         force_high := true;
-      elsif term_record.flag = 'PROFANITY' then
-        score := score + 0;
-      else
+      elsif term_record.flag in (
+        'CONTAINS_LINK',
+        'OBFUSCATED_LINK',
+        'SOCIAL_PROMOTION',
+        'FOLLOW_SOLICITATION',
+        'CONTACT_SOLICITATION',
+        'SOCIAL_HANDLE'
+      ) then
         score := score + 25;
       end if;
     end if;
   end loop;
 
-  select count(*)::integer
-  into duplicate_count
-  from public.chat_messages
-  where event_id = p_event_id
-    and participant_id = p_participant_id
-    and id <> p_message_id
-    and is_admin = false
-    and created_at > now() - interval '10 minutes'
-    and public.normalize_chat_body_for_risk(body) = comparison_body;
-
-  if duplicate_count >= 2 then
-    flags := array_append(flags, 'REPEATED_DUPLICATE');
-    score := score + 30;
-  elsif duplicate_count = 1 then
-    flags := array_append(flags, 'RECENT_DUPLICATE');
-    score := score + 30;
-  end if;
-
   score := least(score, 100);
 
-  if not force_high
-    and not (
-      flags && array[
-        'CONTAINS_LINK',
-        'FOLLOW_SOLICITATION',
-        'CONTACT_SOLICITATION',
-        'SOCIAL_PROMOTION',
-        'SOCIAL_HANDLE',
-        'OBFUSCATED_LINK',
-        'UNSAFE_PROTOCOL',
-        'SCRIPT_PAYLOAD',
-        'BIDI_CONTROL_ABUSE',
-        'PERSONAL_ATTACK',
-        'HARASSMENT',
-        'THREAT',
-        'ARTIST_IMPERSONATION',
-        'ADMIN_IMPERSONATION',
-        'RECENT_DUPLICATE',
-        'REPEATED_DUPLICATE',
-        'HATE_SPEECH'
-      ]::text[]
-    ) then
-    score := least(score, 19);
-  end if;
-
-  if force_high or score >= 60 then
+  if force_high then
     risk_level := 'high';
-    score := greatest(score, 60);
+    score := 60;
   elsif score >= 20 then
     risk_level := 'medium';
+    score := 25;
   else
     risk_level := 'low';
+    score := 0;
   end if;
 
   return jsonb_build_object(
