@@ -4,20 +4,21 @@ import { getAdminChatMessages, getPublicChatMessages } from "@/services/chatServ
 import type { ChatMessage } from "@/types/chat";
 
 type ChatMode = "admin" | "public";
-type PublicChatViewer = { participantId: string; sessionId: string } | null;
+type PublicChatViewer = { participantId: string; sessionId: string; joinedAt: string } | null;
 
 export function useEventChat(eventId: string | null | undefined, mode: ChatMode, viewer: PublicChatViewer = null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(Boolean(eventId));
+  const canReadChat = Boolean(eventId) && (mode === "admin" || Boolean(viewer));
+  const [loading, setLoading] = useState(canReadChat);
   const [error, setError] = useState<string | null>(null);
   const activeScopeRef = useRef("");
-  const viewerKey = viewer ? `${viewer.participantId}:${viewer.sessionId}` : "";
+  const viewerKey = viewer ? `${viewer.participantId}:${viewer.sessionId}:${viewer.joinedAt}` : "";
 
   const loadMessages = useCallback(async (showLoading = true) => {
     const scope = `${mode}:${eventId ?? ""}:${viewerKey}`;
     activeScopeRef.current = scope;
 
-    if (!eventId) {
+    if (!eventId || (mode === "public" && !viewer)) {
       setMessages([]);
       setLoading(false);
       return;
@@ -44,8 +45,8 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode,
     activeScopeRef.current = `${mode}:${eventId ?? ""}:${viewerKey}`;
     setMessages([]);
     setError(null);
-    setLoading(Boolean(eventId));
-  }, [eventId, mode, viewerKey]);
+    setLoading(Boolean(eventId) && (mode === "admin" || Boolean(viewer)));
+  }, [eventId, mode, viewer, viewerKey]);
 
   useEffect(() => {
     loadMessages();
@@ -53,6 +54,7 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode,
 
   useEffect(() => {
     if (!eventId) return;
+    if (mode === "public" && !viewer) return;
 
     const channel = supabase
       .channel(`chat-messages-${mode}-${eventId}`)
@@ -68,7 +70,7 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode,
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [eventId, loadMessages, mode]);
+  }, [eventId, loadMessages, mode, viewer]);
 
   useEffect(() => {
     if (mode !== "public" || !eventId || !viewer) return;

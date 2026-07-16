@@ -66,6 +66,7 @@ assert(localSelected.toISOString() === "2026-07-11T14:36:00.000Z", "Local 16:36 
 assert(localSelected.getHours() === 16 && localSelected.getMinutes() === 36, "Stored UTC should display back as local 16:36.");
 
 const publicPage = readFileSync("src/pages/PublicEventPage.tsx", "utf8");
+const eventChatHook = readFileSync("src/hooks/useEventChat.ts", "utf8");
 assert(publicPage.includes('if (state !== "live")'), "Public page must not request audio while upcoming.");
 assert(publicPage.includes("<AudioPlayer audioUrl={audioUrl}") && publicPage.includes("sourceStatus={audioSourceStatus}") && publicPage.includes("startsAt={startsAt}"), "Live must keep the audio controls mounted in the compact header with explicit audio-source state.");
 assert(publicPage.includes('aria-label={playing ? "Pause live audio" : "Resume live audio"}'), "Live play control must remain an accessible resume/pause control.");
@@ -84,7 +85,7 @@ assert(publicPage.includes("const audioRef = useRef<HTMLAudioElement>(null)") &&
 assert(publicPage.includes("return elapsed % usableDuration") && publicPage.includes("setProgress(livePosition)") && publicPage.includes("window.setInterval"), "Live progress must derive from the event timeline.");
 assert(publicPage.includes("flexWrap: \"nowrap\"") && publicPage.includes("<CompactLiveCountdown target={liveTarget} />"), "Live header must keep title, audio player, and event countdown in one compact row.");
 assert(publicPage.includes("function ChatMessageBubble") && publicPage.includes("const pinnedMessage = messages.find"), "Live chat must render pinned content in a reserved area before the feed.");
-assert(publicPage.includes('useEventChat(state === "live" ? event?.id : undefined'), "Public chat subscription must only initialize while live.");
+assert(publicPage.includes('useEventChat(state === "live" && chatViewer ? event?.id : undefined'), "Public chat subscription must only initialize after live state and verified chat identity exist.");
 assert(publicPage.includes("<LiveEventView"), "Public page must render a dedicated LiveEventView for the live state.");
 assert(publicPage.includes("function LiveEventView") && publicPage.includes("function UpcomingPage") && publicPage.includes("function FinishedPage"), "Public page must keep distinct stage components.");
 assert(!publicPage.includes("function StatusPanel") && !publicPage.includes("function ChatDrawer"), "Public debug/status switcher and drawer path must not render publicly.");
@@ -105,8 +106,12 @@ assert(publicPage.includes('listeners: {listenerCount ?? "—"}') && !publicPage
 assert(publicPage.includes("getEventListenerCount(eventId)") && publicPage.includes("setInterval(loadListenerCount, 10000)"), "Public chat must refresh the cumulative listener count without implementing presence heartbeats.");
 assert(publicPage.includes("class LiveChatErrorBoundary") && publicPage.includes("Chat is temporarily unavailable.") && publicPage.includes("chatError={chat.error}"), "Live chat failures must render a local fallback instead of blacking out the full live stage.");
 assert(publicPage.includes("onListenerCount={setListenerCount}") && publicPage.includes("onListenerCount: (count: number) => void") && publicPage.includes("onListenerCount={onListenerCount}") && !publicPage.includes("onListenerCount={setListenerCount} />"), "Listener-count setter must stay owned by PublicEventPage and be passed explicitly to child join UI.");
+assert(publicPage.includes("joinedAt: joinedIdentity.joinedAt") && publicPage.includes("isValidServerTimestamp(parsed.joinedAt)") && publicPage.includes("joinedAt: participant.joined_at"), "Visitor chat cutoff must come from the trusted joined_at returned by the Join action.");
+assert(eventChatHook.includes('mode === "public" && !viewer') && eventChatHook.includes('mode === "admin" || Boolean(viewer)'), "Public chat history and realtime must not initialize before a verified joined viewer exists.");
+assert(!publicPage.includes("live-chat-stream--prejoin") && !publicPage.includes("live-chat-layout--prejoin") && !publicPage.includes("if (!joined)"), "The removed read-only pre-join chat stream must not be present.");
+assert(publicPage.includes("joinedIdentity ? (") && publicPage.includes("<LiveMessageStream messages={messages}") && publicPage.includes("<JoinChatPanel eventId={eventId} listenerCount={listenerCount}"), "Live chat should have one flow: join panel before identity, active stream after identity.");
 assert(publicPage.includes('className="live-chat__messages"') && publicPage.includes("overflow-y: auto") && publicPage.includes("bottomAnchorRef"), "Joined chat messages must render in a dedicated scroll viewport with a bottom anchor.");
-assert(publicPage.includes('className={`live-chat-layout ${joined ? "live-chat-layout--joined"') && publicPage.includes('className="chat-composer"'), "Joined chat composer must be outside the message viewport in the live chat layout.");
+assert(publicPage.includes('className="live-chat-layout"') && publicPage.includes('className="chat-composer"'), "Joined chat composer must be outside the message viewport in the live chat layout.");
 assert(publicPage.includes("@media (max-width: 640px)") && publicPage.includes("flex: 1 1 0") && publicPage.includes("height: 0") && publicPage.includes("-webkit-overflow-scrolling: touch"), "Mobile joined chat viewport must have Safari-safe flex and scrolling constraints.");
 assert(!publicPage.includes("joined || message.is_admin"), "Pre-join approved messages must not use alternate hidden message markup.");
 assert(!publicPage.includes("ChatAvatar") && !publicPage.includes("ArtistMessageAvatar") && !publicPage.includes("createRetroAvatar"), "Public chat messages and composer must not render generated identity avatars.");

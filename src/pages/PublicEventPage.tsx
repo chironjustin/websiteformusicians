@@ -94,7 +94,7 @@ type JoinedChatIdentity = {
   participantId: string;
   sessionId: string;
   displayName: string;
-  joinedAt?: string;
+  joinedAt: string;
 };
 
 function pad2(value: number) {
@@ -168,22 +168,8 @@ function GlobalStyles() {
       position: relative;
       flex: 1 1 auto;
       min-height: 0;
-    }
-    .live-chat-layout--joined {
       display: flex;
       flex-direction: column;
-    }
-    .live-chat-stream--prejoin {
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 8.1rem;
-      bottom: 17rem;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      z-index: 3;
     }
     .live-chat-stream--joined {
       position: relative;
@@ -255,13 +241,11 @@ function GlobalStyles() {
       }
       .live-event-content,
       .live-chat-layout,
-      .live-chat-layout--joined,
       .live-chat-stream--joined {
         min-height: 0;
         overflow: hidden;
       }
       .live-chat-layout,
-      .live-chat-layout--joined,
       .live-chat-stream--joined {
         flex: 1 1 0;
       }
@@ -871,7 +855,7 @@ function readStoredChatIdentity(eventId: string): JoinedChatIdentity | null {
   if (participantValue) {
     try {
       const parsed = JSON.parse(participantValue) as Partial<JoinedChatIdentity>;
-      if (parsed.participantId && parsed.sessionId && parsed.displayName) {
+      if (parsed.participantId && parsed.sessionId && parsed.displayName && isValidServerTimestamp(parsed.joinedAt)) {
         return {
           participantId: parsed.participantId,
           sessionId: parsed.sessionId,
@@ -879,12 +863,19 @@ function readStoredChatIdentity(eventId: string): JoinedChatIdentity | null {
           joinedAt: parsed.joinedAt,
         };
       }
+      window.localStorage.removeItem(getEventChatParticipantKey(eventId));
+      window.localStorage.removeItem(getEventChatNameKey(eventId));
     } catch {
       window.localStorage.removeItem(getEventChatParticipantKey(eventId));
+      window.localStorage.removeItem(getEventChatNameKey(eventId));
     }
   }
 
   return null;
+}
+
+function isValidServerTimestamp(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
 function storeChatIdentity(eventId: string, identity: JoinedChatIdentity) {
@@ -968,8 +959,9 @@ export default function PublicEventPage() {
   const chatViewer = useMemo(() => joinedIdentity ? {
     participantId: joinedIdentity.participantId,
     sessionId: joinedIdentity.sessionId,
+    joinedAt: joinedIdentity.joinedAt,
   } : null, [joinedIdentity]);
-  const chat = useEventChat(state === "live" ? event?.id : undefined, "public", chatViewer);
+  const chat = useEventChat(state === "live" && chatViewer ? event?.id : undefined, "public", chatViewer);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -1757,16 +1749,13 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
     });
   }, [audioPipelineDiagnostics.audioPathPresent, audioPipelineDiagnostics.finalAudioUrlPresent, audioPipelineDiagnostics.signingRequest, audioPipelineDiagnostics.sourceIdentity, eventId, joinedIdentity]);
 
-  const joined = Boolean(joinedIdentity);
-
   return (
     <div className="live-event-view">
       <div className="live-event-content">
         <LiveAudioHeader title={title} audioUrl={audioUrl} audioSourceStatus={audioSourceStatus} audioPipelineDiagnostics={audioPipelineDiagnostics} startsAt={startsAt} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
-        <LiveChatErrorBoundary resetKey={`${eventId}:${joinedIdentity?.participantId ?? "prejoin"}`}>
-          <div className={`live-chat-layout ${joined ? "live-chat-layout--joined" : "live-chat-layout--prejoin"}`}>
-            <LiveMessageStream messages={messages} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} listenerCount={listenerCount} chatError={chatError} />
+        <LiveChatErrorBoundary resetKey={`${eventId}:${joinedIdentity?.participantId ?? "join"}`}>
+          <div className="live-chat-layout">
             <BouncingArtistPortrait imageUrl={artistUrl} />
             {starting && (
               <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
@@ -1774,9 +1763,12 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
               </p>
             )}
             {joinedIdentity ? (
-              <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
+              <>
+                <LiveMessageStream messages={messages} eventId={eventId} artistName={artistName} artistUrl={artistUrl} listenerCount={listenerCount} chatError={chatError} />
+                <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
+              </>
             ) : (
-              <JoinChatPanel eventId={eventId} onJoin={onJoin} onListenerCount={onListenerCount} />
+              <JoinChatPanel eventId={eventId} listenerCount={listenerCount} onJoin={onJoin} onListenerCount={onListenerCount} />
             )}
           </div>
         </LiveChatErrorBoundary>
@@ -1799,7 +1791,7 @@ function LiveAudioHeader({ title, audioUrl, audioSourceStatus, audioPipelineDiag
   );
 }
 
-function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl, listenerCount, chatError }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistName: string; artistUrl: string; listenerCount: number | null; chatError: string | null }) {
+function LiveMessageStream({ messages, eventId, artistName, artistUrl, listenerCount, chatError }: { messages: ChatMessage[]; eventId: string; artistName: string; artistUrl: string; listenerCount: number | null; chatError: string | null }) {
   const pinnedMessage = messages.find(message => message.is_pinned);
   const feedMessages = pinnedMessage ? messages.filter(message => message.id !== pinnedMessage.id) : messages;
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -1814,8 +1806,6 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl, l
   }, [eventId]);
 
   useEffect(() => {
-    if (!joined) return;
-
     const viewport = viewportRef.current;
     const bottomAnchor = bottomAnchorRef.current;
     if (!viewport || !bottomAnchor) return;
@@ -1834,28 +1824,13 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl, l
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [joined, latestMessageId, messages.length]);
+  }, [latestMessageId, messages.length]);
 
   function updateNearBottom() {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     wasNearBottomRef.current = distanceFromBottom < 80;
-  }
-
-  if (!joined) {
-    return (
-      <section className="live-chat-stream--prejoin" style={{ opacity: messages.length > 0 ? 1 : 0.28 }}>
-        {pinnedMessage && (
-          <div style={{ width: "min(100%, 620px)" }}>
-            <ChatMessageBubble message={pinnedMessage} joined={joined} artistName={artistName} artistUrl={artistUrl} pinnedArea />
-          </div>
-        )}
-        {feedMessages.map(message => (
-          <ChatMessageBubble key={message.id} message={message} joined={joined} artistName={artistName} artistUrl={artistUrl} />
-        ))}
-      </section>
-    );
   }
 
   return (
@@ -1868,11 +1843,11 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl, l
       <div ref={viewportRef} className="live-chat__messages" onScroll={updateNearBottom}>
         {pinnedMessage && (
           <div style={{ width: "min(100%, 620px)" }}>
-            <ChatMessageBubble message={pinnedMessage} joined={joined} artistName={artistName} artistUrl={artistUrl} pinnedArea />
+            <ChatMessageBubble message={pinnedMessage} artistName={artistName} artistUrl={artistUrl} pinnedArea />
           </div>
         )}
         {feedMessages.map(message => (
-          <ChatMessageBubble key={message.id} message={message} joined={joined} artistName={artistName} artistUrl={artistUrl} />
+          <ChatMessageBubble key={message.id} message={message} artistName={artistName} artistUrl={artistUrl} />
         ))}
         <div ref={bottomAnchorRef} aria-hidden="true" style={{ height: 1, flexShrink: 0 }} />
       </div>
@@ -1880,15 +1855,15 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl, l
   );
 }
 
-function ChatMessageBubble({ message, joined, artistName, artistUrl, pinnedArea = false }: { message: ChatMessage; joined: boolean; artistName: string; artistUrl: string; pinnedArea?: boolean }) {
+function ChatMessageBubble({ message, artistName, artistUrl, pinnedArea = false }: { message: ChatMessage; artistName: string; artistUrl: string; pinnedArea?: boolean }) {
   const displayName = message.is_admin ? artistName : message.display_name;
   const labels = getPublicMessageLabels(message);
 
   return (
     <div style={{
-      maxWidth: pinnedArea ? "100%" : joined ? "min(88%, 620px)" : "88%",
+      maxWidth: pinnedArea ? "100%" : "min(88%, 620px)",
       borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
-      padding: joined ? "0.45rem 0 0.45rem 0.65rem" : "0.25rem 0 0.25rem 0.65rem",
+      padding: "0.45rem 0 0.45rem 0.65rem",
       background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
     }}>
       <div style={{ minWidth: 0 }}>
@@ -1929,7 +1904,7 @@ function ArtistLikeIndicator({ artistUrl }: { artistUrl: string }) {
   );
 }
 
-function JoinChatPanel({ eventId, onJoin, onListenerCount }: { eventId: string; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void }) {
+function JoinChatPanel({ eventId, listenerCount, onJoin, onListenerCount }: { eventId: string; listenerCount: number | null; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void }) {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
 
@@ -1964,6 +1939,7 @@ function JoinChatPanel({ eventId, onJoin, onListenerCount }: { eventId: string; 
     <form onSubmit={join} style={{ position: "absolute", left: "50%", bottom: "clamp(8.5rem, 18vh, 13rem)", transform: "translateX(-50%)", width: "min(350px, 82vw)", display: "grid", gap: "1.25rem", zIndex: 3 }}>
       <div style={{ textAlign: "center", display: "grid", gap: "0.9rem" }}>
         <p style={{ fontFamily: PSP, fontSize: "clamp(1rem, 4vw, 1.55rem)", color: "#FFFFFF", letterSpacing: "0.06em" }}>join chat</p>
+        <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.45)", fontSize: "1.05rem", letterSpacing: "0.1em", margin: 0 }}>listeners: {listenerCount ?? "—"}</p>
       </div>
       <button disabled={joining} style={enterButtonStyle}>
         [ join ]
