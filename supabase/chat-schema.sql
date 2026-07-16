@@ -61,7 +61,7 @@ create table if not exists public.chat_messages (
     (status <> 'approved' and published_at is null)
   ),
   constraint chat_messages_queue_state_check check (
-    (status = 'queued' and queued_at is not null and published_at is null)
+    (status = 'queued' and queued_at is not null and published_at is null and risk_level = 'low' and auto_publish_eligible = true)
     or
     (status <> 'queued')
   ),
@@ -84,6 +84,34 @@ where status = 'queued';
 create index if not exists chat_messages_event_auto_publish_idx
 on public.chat_messages(event_id, auto_publish_eligible, status, queued_at)
 where auto_publish_eligible = true;
+
+create or replace function public.is_chat_message_auto_publish_eligible(p_message public.chat_messages)
+returns boolean
+language sql
+stable
+set search_path = public
+as $$
+  select
+    p_message.status = 'queued'
+    and p_message.risk_level = 'low'
+    and p_message.auto_publish_eligible = true
+    and p_message.published_at is null
+    and not (
+      coalesce(p_message.risk_flags, array[]::text[])
+      && array[
+        'CONTAINS_LINK',
+        'OBFUSCATED_LINK',
+        'UNSAFE_PROTOCOL',
+        'SOCIAL_PROMOTION',
+        'FOLLOW_SOLICITATION',
+        'CONTACT_SOLICITATION',
+        'SOCIAL_HANDLE',
+        'CLASSIFIER_FAILURE'
+      ]::text[]
+    );
+$$;
+
+revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from public;
 create unique index if not exists chat_messages_event_participant_client_token_idx
 on public.chat_messages(event_id, participant_id, client_token)
 where event_id is not null
@@ -96,7 +124,7 @@ create table if not exists public.chat_message_moderation_audit (
   message_id uuid references public.chat_messages(id) on delete cascade,
   participant_id uuid references public.event_chat_participants(id) on delete set null,
   actor_id uuid references auth.users(id) on delete set null,
-  action text not null check (action in ('message_approved', 'message_rejected', 'message_classified', 'message_auto_rejected', 'message_queued', 'message_auto_approved', 'queue_paused', 'queue_resumed', 'auto_publish_enabled', 'auto_publish_disabled')),
+  action text not null check (action in ('message_approved', 'message_rejected', 'message_classified', 'message_auto_rejected', 'message_queued', 'message_auto_approved', 'queue_eligibility_revoked', 'queue_paused', 'queue_resumed', 'auto_publish_enabled', 'auto_publish_disabled')),
   previous_status text not null,
   new_status text not null,
   reason text,
@@ -605,14 +633,42 @@ begin
   from public.events
   where id = p_event_id;
 
-  if clean_body ~* '(https?://|www\.)' then
-    flags := array_append(flags, 'CONTAINS_LINK');
-    score := score + 25;
-  end if;
+  mention_count := length(clean_body) - length(replace(clean_body, '@', ''));
 
   if clean_body ~* '(javascript|data|file)\s*:' then
     flags := array_append(flags, 'UNSAFE_PROTOCOL');
     force_high := true;
+  end if;
+
+  if clean_body ~* '(https?://|www\.)'
+    or comparison_body ~ '(^|[^[:alnum:]_@-])([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+(com|org|net|edu|gov|io|co|uk|de|fr|it|es|nl|be|ch|at|se|no|dk|fi|pl|cz|ca|us|au|nz|jp|kr|cn|in|br|mx|tv|fm|me|app|dev|gg|ly|cloud|info|biz|xyz|shop|store|music|social)([/:?#][^[:space:]]*)?([^[:alnum:]_]|$)' then
+    flags := array_append(flags, 'CONTAINS_LINK');
+    score := score + 25;
+  end if;
+
+  if comparison_body ~ '(^|[[:space:][:punct:]])@[a-z0-9][a-z0-9._]{1,28}[a-z0-9]([^a-z0-9._]|$)'
+    and (
+      comparison_body ~ '(follow|dm|message|contact|add|subscribe|join|check|profile|account|insta|instagram|ig|tiktok|tik tok|twitter|snapchat|snap|discord|telegram|twitch|youtube|yt|soundcloud|spotify|facebook|fb)'
+      or mention_count > 1
+    ) then
+    flags := array_append(flags, 'SOCIAL_HANDLE');
+    score := score + 15;
+  end if;
+
+  if comparison_body ~ '(follow me|follow my|follow @[a-z0-9_\.]|follow [a-z0-9_\.]*|subscribe to me|subscribe to my|check my page|check my profile|check out my account|check my account)' then
+    flags := array_append(flags, 'FOLLOW_SOLICITATION');
+    score := score + 25;
+  end if;
+
+  if comparison_body ~ '(dm me|dm @[a-z0-9_\.]|message me|message me on|contact me|add me|add me on|send me a dm|hit me up|join my|join the discord|my insta is|my instagram is|my ig is|my snap is|my snapchat is|my telegram is)' then
+    flags := array_append(flags, 'CONTACT_SOLICITATION');
+    score := score + 25;
+  end if;
+
+  if comparison_body ~ '(follow|subscribe|dm|message|contact|add me|join|check my|my (insta|instagram|ig|snap|snapchat|telegram))'
+    and comparison_body ~ '(instagram|insta|ig|tiktok|tik tok|twitter|snapchat|snap|discord|telegram|twitch|youtube|yt|soundcloud|spotify|facebook|fb|@[a-z0-9])' then
+    flags := array_append(flags, 'SOCIAL_PROMOTION');
+    score := score + 10;
   end if;
 
   if clean_body ~* '([a-z0-9-]+\s*(\[dot\]|\(dot\)| dot )\s*[a-z]{2,})' then
@@ -961,14 +1017,55 @@ begin
       risk_flags = coalesce(ARRAY(SELECT jsonb_array_elements_text(classification->'riskFlags')), array[]::text[]),
       classified_at = v_now,
       classifier_version = classification->>'classifierVersion',
-      auto_publish_eligible = (classification->>'autoPublishEligible')::boolean,
+      auto_publish_eligible = (classification->>'autoPublishEligible')::boolean
+        and not (
+          coalesce(ARRAY(SELECT jsonb_array_elements_text(classification->'riskFlags')), array[]::text[])
+          && array[
+            'CONTAINS_LINK',
+            'OBFUSCATED_LINK',
+            'UNSAFE_PROTOCOL',
+            'SOCIAL_PROMOTION',
+            'FOLLOW_SOLICITATION',
+            'CONTACT_SOLICITATION',
+            'SOCIAL_HANDLE',
+            'CLASSIFIER_FAILURE'
+          ]::text[]
+        ),
       status = case
         when classification->>'riskLevel' = 'high' then 'rejected'
-        when classification->>'riskLevel' = 'low' and (classification->>'autoPublishEligible')::boolean then 'queued'
+        when classification->>'riskLevel' = 'low'
+          and (classification->>'autoPublishEligible')::boolean
+          and not (
+            coalesce(ARRAY(SELECT jsonb_array_elements_text(classification->'riskFlags')), array[]::text[])
+            && array[
+              'CONTAINS_LINK',
+              'OBFUSCATED_LINK',
+              'UNSAFE_PROTOCOL',
+              'SOCIAL_PROMOTION',
+              'FOLLOW_SOLICITATION',
+              'CONTACT_SOLICITATION',
+              'SOCIAL_HANDLE',
+              'CLASSIFIER_FAILURE'
+            ]::text[]
+          ) then 'queued'
         else 'pending'
       end,
       queued_at = case
-        when classification->>'riskLevel' = 'low' and (classification->>'autoPublishEligible')::boolean then v_now
+        when classification->>'riskLevel' = 'low'
+          and (classification->>'autoPublishEligible')::boolean
+          and not (
+            coalesce(ARRAY(SELECT jsonb_array_elements_text(classification->'riskFlags')), array[]::text[])
+            && array[
+              'CONTAINS_LINK',
+              'OBFUSCATED_LINK',
+              'UNSAFE_PROTOCOL',
+              'SOCIAL_PROMOTION',
+              'FOLLOW_SOLICITATION',
+              'CONTACT_SOLICITATION',
+              'SOCIAL_HANDLE',
+              'CLASSIFIER_FAILURE'
+            ]::text[]
+          ) then v_now
         else null
       end,
       rejected_at = case when classification->>'riskLevel' = 'high' then v_now else rejected_at end,
@@ -1508,10 +1605,7 @@ begin
     from public.chat_messages
     where chat_messages.event_id = event_record.id
       and chat_messages.status = 'queued'
-      and chat_messages.risk_level = 'low'
-      and chat_messages.auto_publish_eligible = true
       and chat_messages.is_admin = false
-      and not ('CLASSIFIER_FAILURE' = any(chat_messages.risk_flags))
       and exists (
         select 1
         from public.event_chat_participants
@@ -1526,6 +1620,48 @@ begin
       continue;
     end if;
 
+    if not public.is_chat_message_auto_publish_eligible(message_record) then
+      update public.chat_messages
+      set
+        status = 'pending',
+        auto_publish_eligible = false,
+        queued_at = null,
+        last_queue_error = 'queue_eligibility_revoked'
+      where id = message_record.id
+        and status = 'queued'
+      returning * into updated_message;
+
+      insert into public.chat_message_moderation_audit (
+        event_id,
+        message_id,
+        participant_id,
+        actor_id,
+        action,
+        previous_status,
+        new_status,
+        reason,
+        risk_level,
+        risk_flags,
+        classifier_version
+      )
+      values (
+        updated_message.event_id,
+        updated_message.id,
+        updated_message.participant_id,
+        null,
+        'queue_eligibility_revoked',
+        'queued',
+        'pending',
+        'disqualifying_risk_flags',
+        updated_message.risk_level,
+        updated_message.risk_flags,
+        updated_message.classifier_version
+      );
+
+      skipped_count := skipped_count + 1;
+      continue;
+    end if;
+
     update public.chat_messages
     set
       status = 'approved',
@@ -1536,9 +1672,7 @@ begin
       queue_attempt_count = queue_attempt_count + 1,
       last_queue_error = null
     where id = message_record.id
-      and status = 'queued'
-      and risk_level = 'low'
-      and auto_publish_eligible = true
+      and public.is_chat_message_auto_publish_eligible(chat_messages)
     returning * into updated_message;
 
     if updated_message.id is null then
@@ -1649,6 +1783,45 @@ select cron.schedule(
 -- from cron.job
 -- where jobname like '%chat%publish%queue%';
 -- Expected: exactly one active row named process-chat-publish-queue with schedule 3 seconds.
+
+with revoked as (
+  update public.chat_messages
+  set
+    status = 'pending',
+    auto_publish_eligible = false,
+    queued_at = null,
+    published_at = null,
+    last_queue_error = 'queue_eligibility_revoked'
+  where status = 'queued'
+    and not public.is_chat_message_auto_publish_eligible(chat_messages)
+  returning *
+)
+insert into public.chat_message_moderation_audit (
+  event_id,
+  message_id,
+  participant_id,
+  actor_id,
+  action,
+  previous_status,
+  new_status,
+  reason,
+  risk_level,
+  risk_flags,
+  classifier_version
+)
+select
+  revoked.event_id,
+  revoked.id,
+  revoked.participant_id,
+  null,
+  'queue_eligibility_revoked',
+  'queued',
+  'pending',
+  'migration_repair',
+  revoked.risk_level,
+  revoked.risk_flags,
+  revoked.classifier_version
+from revoked;
 
 -- alter publication supabase_realtime add table public.chat_messages;
 

@@ -26,7 +26,7 @@ drop constraint if exists chat_messages_queue_state_check;
 alter table public.chat_messages
 add constraint chat_messages_queue_state_check
 check (
-  (status = 'queued' and queued_at is not null and published_at is null)
+  (status = 'queued' and queued_at is not null and published_at is null and risk_level = 'low' and auto_publish_eligible = true)
   or
   (status <> 'queued')
 );
@@ -46,6 +46,34 @@ create index if not exists chat_messages_event_auto_publish_idx
 on public.chat_messages(event_id, auto_publish_eligible, status, queued_at)
 where auto_publish_eligible = true;
 
+create or replace function public.is_chat_message_auto_publish_eligible(p_message public.chat_messages)
+returns boolean
+language sql
+stable
+set search_path = public
+as $$
+  select
+    p_message.status = 'queued'
+    and p_message.risk_level = 'low'
+    and p_message.auto_publish_eligible = true
+    and p_message.published_at is null
+    and not (
+      coalesce(p_message.risk_flags, array[]::text[])
+      && array[
+        'CONTAINS_LINK',
+        'OBFUSCATED_LINK',
+        'UNSAFE_PROTOCOL',
+        'SOCIAL_PROMOTION',
+        'FOLLOW_SOLICITATION',
+        'CONTACT_SOLICITATION',
+        'SOCIAL_HANDLE',
+        'CLASSIFIER_FAILURE'
+      ]::text[]
+    );
+$$;
+
+revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from public;
+
 alter table public.chat_message_moderation_audit
 alter column message_id drop not null;
 
@@ -62,6 +90,7 @@ check (
     'message_auto_rejected',
     'message_queued',
     'message_auto_approved',
+    'queue_eligibility_revoked',
     'queue_paused',
     'queue_resumed',
     'auto_publish_enabled',
@@ -240,14 +269,55 @@ begin
       risk_flags = coalesce(ARRAY(SELECT jsonb_array_elements_text(classification->'riskFlags')), array[]::text[]),
       classified_at = v_now,
       classifier_version = classification->>'classifierVersion',
-      auto_publish_eligible = (classification->>'autoPublishEligible')::boolean,
+      auto_publish_eligible = (classification->>'autoPublishEligible')::boolean
+        and not (
+          coalesce(ARRAY(SELECT jsonb_array_elements_text(classification->'riskFlags')), array[]::text[])
+          && array[
+            'CONTAINS_LINK',
+            'OBFUSCATED_LINK',
+            'UNSAFE_PROTOCOL',
+            'SOCIAL_PROMOTION',
+            'FOLLOW_SOLICITATION',
+            'CONTACT_SOLICITATION',
+            'SOCIAL_HANDLE',
+            'CLASSIFIER_FAILURE'
+          ]::text[]
+        ),
       status = case
         when classification->>'riskLevel' = 'high' then 'rejected'
-        when classification->>'riskLevel' = 'low' and (classification->>'autoPublishEligible')::boolean then 'queued'
+        when classification->>'riskLevel' = 'low'
+          and (classification->>'autoPublishEligible')::boolean
+          and not (
+            coalesce(ARRAY(SELECT jsonb_array_elements_text(classification->'riskFlags')), array[]::text[])
+            && array[
+              'CONTAINS_LINK',
+              'OBFUSCATED_LINK',
+              'UNSAFE_PROTOCOL',
+              'SOCIAL_PROMOTION',
+              'FOLLOW_SOLICITATION',
+              'CONTACT_SOLICITATION',
+              'SOCIAL_HANDLE',
+              'CLASSIFIER_FAILURE'
+            ]::text[]
+          ) then 'queued'
         else 'pending'
       end,
       queued_at = case
-        when classification->>'riskLevel' = 'low' and (classification->>'autoPublishEligible')::boolean then v_now
+        when classification->>'riskLevel' = 'low'
+          and (classification->>'autoPublishEligible')::boolean
+          and not (
+            coalesce(ARRAY(SELECT jsonb_array_elements_text(classification->'riskFlags')), array[]::text[])
+            && array[
+              'CONTAINS_LINK',
+              'OBFUSCATED_LINK',
+              'UNSAFE_PROTOCOL',
+              'SOCIAL_PROMOTION',
+              'FOLLOW_SOLICITATION',
+              'CONTACT_SOLICITATION',
+              'SOCIAL_HANDLE',
+              'CLASSIFIER_FAILURE'
+            ]::text[]
+          ) then v_now
         else null
       end,
       rejected_at = case when classification->>'riskLevel' = 'high' then v_now else rejected_at end,
@@ -603,10 +673,7 @@ begin
     from public.chat_messages
     where chat_messages.event_id = event_record.id
       and chat_messages.status = 'queued'
-      and chat_messages.risk_level = 'low'
-      and chat_messages.auto_publish_eligible = true
       and chat_messages.is_admin = false
-      and not ('CLASSIFIER_FAILURE' = any(chat_messages.risk_flags))
       and exists (
         select 1
         from public.event_chat_participants
@@ -621,6 +688,48 @@ begin
       continue;
     end if;
 
+    if not public.is_chat_message_auto_publish_eligible(message_record) then
+      update public.chat_messages
+      set
+        status = 'pending',
+        auto_publish_eligible = false,
+        queued_at = null,
+        last_queue_error = 'queue_eligibility_revoked'
+      where id = message_record.id
+        and status = 'queued'
+      returning * into updated_message;
+
+      insert into public.chat_message_moderation_audit (
+        event_id,
+        message_id,
+        participant_id,
+        actor_id,
+        action,
+        previous_status,
+        new_status,
+        reason,
+        risk_level,
+        risk_flags,
+        classifier_version
+      )
+      values (
+        updated_message.event_id,
+        updated_message.id,
+        updated_message.participant_id,
+        null,
+        'queue_eligibility_revoked',
+        'queued',
+        'pending',
+        'disqualifying_risk_flags',
+        updated_message.risk_level,
+        updated_message.risk_flags,
+        updated_message.classifier_version
+      );
+
+      skipped_count := skipped_count + 1;
+      continue;
+    end if;
+
     update public.chat_messages
     set
       status = 'approved',
@@ -631,9 +740,7 @@ begin
       queue_attempt_count = queue_attempt_count + 1,
       last_queue_error = null
     where id = message_record.id
-      and status = 'queued'
-      and risk_level = 'low'
-      and auto_publish_eligible = true
+      and public.is_chat_message_auto_publish_eligible(chat_messages)
     returning * into updated_message;
 
     if updated_message.id is null then
@@ -744,5 +851,44 @@ select cron.schedule(
 -- from cron.job
 -- where jobname like '%chat%publish%queue%';
 -- Expected: exactly one active row named process-chat-publish-queue with schedule 3 seconds.
+
+with revoked as (
+  update public.chat_messages
+  set
+    status = 'pending',
+    auto_publish_eligible = false,
+    queued_at = null,
+    published_at = null,
+    last_queue_error = 'queue_eligibility_revoked'
+  where status = 'queued'
+    and not public.is_chat_message_auto_publish_eligible(chat_messages)
+  returning *
+)
+insert into public.chat_message_moderation_audit (
+  event_id,
+  message_id,
+  participant_id,
+  actor_id,
+  action,
+  previous_status,
+  new_status,
+  reason,
+  risk_level,
+  risk_flags,
+  classifier_version
+)
+select
+  revoked.event_id,
+  revoked.id,
+  revoked.participant_id,
+  null,
+  'queue_eligibility_revoked',
+  'queued',
+  'pending',
+  'migration_repair',
+  revoked.risk_level,
+  revoked.risk_flags,
+  revoked.classifier_version
+from revoked;
 
 notify pgrst, 'reload schema';
