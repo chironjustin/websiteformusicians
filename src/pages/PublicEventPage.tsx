@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, useEffect, useMemo, useRef, useState } from "react";
 import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemainingMilliseconds } from "@/lib/eventTiming";
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
@@ -56,6 +56,35 @@ type AudioUrlPipelineDiagnostics = {
   directRestAudioUrlPresent: boolean;
   directRestError: string;
 };
+
+class LiveChatErrorBoundary extends Component<
+  { children: React.ReactNode; resetKey: string },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("[live-chat-render]", error);
+  }
+
+  componentDidUpdate(previousProps: { resetKey: string }) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <ChatUnavailableNotice />;
+    }
+
+    return this.props.children;
+  }
+}
 
 const CHAT_NAME_KEY_PREFIX = "music-event-chat-name:";
 const CHAT_PARTICIPANT_KEY_PREFIX = "music-event-chat-participant:";
@@ -1554,6 +1583,7 @@ export default function PublicEventPage() {
           liveTarget={countdownTarget}
           eventId={event.id}
           messages={chat.messages}
+          chatError={chat.error}
           listenerCount={listenerCount}
           joinedIdentity={joinedIdentity}
           onJoin={setJoinedIdentity}
@@ -1576,6 +1606,29 @@ function LoadingShell({ children }: { children: React.ReactNode }) {
         {children}
       </div>
     </main>
+  );
+}
+
+function ChatUnavailableNotice() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        width: "100%",
+        border: "1px solid rgba(0,255,65,0.22)",
+        background: "rgba(0,0,0,0.72)",
+        color: "rgba(0,255,65,0.68)",
+        fontFamily: VT,
+        fontSize: "1rem",
+        letterSpacing: "0.08em",
+        lineHeight: 1.2,
+        padding: "0.65rem 0.75rem",
+        textAlign: "center",
+      }}
+    >
+      Chat is temporarily unavailable.
+    </div>
   );
 }
 
@@ -1691,7 +1744,7 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
   );
 }
 
-function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, listenerCount, joinedIdentity, onJoin, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; listenerCount: number | null; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
+function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, chatError, listenerCount, joinedIdentity, onJoin, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; chatError: string | null; listenerCount: number | null; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
   useEffect(() => {
     console.info("[live-chat-join-state]", {
       eventId,
@@ -1710,20 +1763,22 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
       <div className="live-event-content">
         <LiveAudioHeader title={title} audioUrl={audioUrl} audioSourceStatus={audioSourceStatus} audioPipelineDiagnostics={audioPipelineDiagnostics} startsAt={startsAt} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
-        <div className={`live-chat-layout ${joined ? "live-chat-layout--joined" : "live-chat-layout--prejoin"}`}>
-          <LiveMessageStream messages={messages} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} listenerCount={listenerCount} />
-          <BouncingArtistPortrait imageUrl={artistUrl} />
-          {starting && (
-            <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
-              event is starting...
-            </p>
-          )}
-          {joinedIdentity ? (
-            <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
-          ) : (
-            <JoinChatPanel eventId={eventId} onJoin={onJoin} onListenerCount={setListenerCount} />
-          )}
-        </div>
+        <LiveChatErrorBoundary resetKey={`${eventId}:${joinedIdentity?.participantId ?? "prejoin"}`}>
+          <div className={`live-chat-layout ${joined ? "live-chat-layout--joined" : "live-chat-layout--prejoin"}`}>
+            <LiveMessageStream messages={messages} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} listenerCount={listenerCount} chatError={chatError} />
+            <BouncingArtistPortrait imageUrl={artistUrl} />
+            {starting && (
+              <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
+                event is starting...
+              </p>
+            )}
+            {joinedIdentity ? (
+              <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
+            ) : (
+              <JoinChatPanel eventId={eventId} onJoin={onJoin} onListenerCount={setListenerCount} />
+            )}
+          </div>
+        </LiveChatErrorBoundary>
       </div>
     </div>
   );
@@ -1743,7 +1798,7 @@ function LiveAudioHeader({ title, audioUrl, audioSourceStatus, audioPipelineDiag
   );
 }
 
-function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl, listenerCount }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistName: string; artistUrl: string; listenerCount: number | null }) {
+function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl, listenerCount, chatError }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistName: string; artistUrl: string; listenerCount: number | null; chatError: string | null }) {
   const pinnedMessage = messages.find(message => message.is_pinned);
   const feedMessages = pinnedMessage ? messages.filter(message => message.id !== pinnedMessage.id) : messages;
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -1808,6 +1863,7 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl, l
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.45rem", letterSpacing: "0.22em" }}>live chat</p>
         <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.4)", fontSize: "1.05rem", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>listeners: {listenerCount ?? "—"}</p>
       </div>
+      {chatError && <ChatUnavailableNotice />}
       <div ref={viewportRef} className="live-chat__messages" onScroll={updateNearBottom}>
         {pinnedMessage && (
           <div style={{ width: "min(100%, 620px)" }}>
