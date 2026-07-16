@@ -38,6 +38,7 @@ add column if not exists classifier_version text;
 
 alter table public.chat_message_moderation_audit enable row level security;
 revoke all on table public.chat_message_moderation_audit from anon, authenticated;
+grant select on table public.chat_message_moderation_audit to authenticated;
 
 drop policy if exists "Owners can read chat moderation audit rows" on public.chat_message_moderation_audit;
 create policy "Owners can read chat moderation audit rows"
@@ -353,6 +354,8 @@ begin
   );
 end;
 $$;
+
+revoke all on function public.classify_chat_message(uuid, uuid, uuid, text) from public, anon, authenticated;
 
 drop function if exists public.submit_chat_message(uuid, text, text, uuid);
 drop function if exists public.submit_chat_message(uuid, uuid, text, text, text, uuid);

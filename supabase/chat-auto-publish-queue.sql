@@ -48,6 +48,7 @@ where auto_publish_eligible = true;
 
 alter table public.chat_message_moderation_audit enable row level security;
 revoke all on table public.chat_message_moderation_audit from anon, authenticated;
+grant select on table public.chat_message_moderation_audit to authenticated;
 
 drop policy if exists "Owners can read chat moderation audit rows" on public.chat_message_moderation_audit;
 create policy "Owners can read chat moderation audit rows"
@@ -93,6 +94,7 @@ as $$
 $$;
 
 revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from public;
+revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from anon, authenticated;
 
 alter table public.chat_message_moderation_audit
 alter column message_id drop not null;

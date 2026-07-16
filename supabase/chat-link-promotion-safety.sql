@@ -24,6 +24,7 @@ check (
 
 alter table public.chat_message_moderation_audit enable row level security;
 revoke all on table public.chat_message_moderation_audit from anon, authenticated;
+grant select on table public.chat_message_moderation_audit to authenticated;
 
 drop policy if exists "Owners can read chat moderation audit rows" on public.chat_message_moderation_audit;
 create policy "Owners can read chat moderation audit rows"
@@ -292,6 +293,7 @@ begin
 end;
 $$;
 
+revoke all on function public.classify_chat_message(uuid, uuid, uuid, text) from public, anon, authenticated;
 
 create or replace function public.is_chat_message_auto_publish_eligible(p_message public.chat_messages)
 returns boolean
@@ -320,6 +322,7 @@ as $$
 $$;
 
 revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from public;
+revoke all on function public.is_chat_message_auto_publish_eligible(public.chat_messages) from anon, authenticated;
 
 
 create or replace function public.submit_chat_message(
@@ -890,17 +893,31 @@ select cron.schedule(
 -- select table_name, grantee, privilege_type
 -- from information_schema.role_table_grants
 -- where table_schema = 'public'
---   and table_name in ('chat_message_moderation_audit', 'chat_risk_terms')
+--   and table_name = 'chat_message_moderation_audit'
 -- order by table_name, grantee, privilege_type;
--- Expected: no broad audit-table write access and no public risk-term access for anon/authenticated.
+-- Expected: authenticated has SELECT only; anon has no privileges; no client role has INSERT, UPDATE, DELETE, or TRUNCATE.
+--
+-- Check policies:
+-- select schemaname, tablename, policyname, roles, cmd, qual, with_check
+-- from pg_policies
+-- where schemaname = 'public'
+--   and tablename in ('chat_message_moderation_audit', 'chat_risk_terms')
+-- order by tablename, policyname;
+-- Expected: audit table has only the owner-scoped SELECT policy for client access; risk-term table has no broad client policy.
 --
 -- Check function privileges:
 -- select routine_name, grantee, privilege_type
 -- from information_schema.routine_privileges
 -- where routine_schema = 'public'
---   and routine_name in ('process_chat_auto_publish_queue', 'process_chat_publish_queue', 'submit_chat_message')
+--   and routine_name in (
+--     'classify_chat_message',
+--     'is_chat_message_auto_publish_eligible',
+--     'process_chat_auto_publish_queue',
+--     'process_chat_publish_queue',
+--     'submit_chat_message'
+--   )
 -- order by routine_name, grantee;
--- Expected: no anon/authenticated EXECUTE on worker functions; submit_chat_message remains executable by anon/authenticated.
+-- Expected: submit_chat_message executable by anon/authenticated; classifier, eligibility helper, and workers not executable by anon/authenticated.
 --
 -- Check cron:
 -- select jobid, jobname, schedule, command, active
