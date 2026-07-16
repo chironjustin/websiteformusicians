@@ -192,24 +192,6 @@ begin
   if clean_body ~* '(<\s*script|<\s*iframe|onerror\s*=|onclick\s*=|javascript\s*:)' then
     flags := array_append(flags, 'SCRIPT_PAYLOAD');
     force_high := true;
-  elsif clean_body ~* '<\s*[a-z][^>]*>' then
-    flags := array_append(flags, 'HTML_MARKUP');
-    score := score + 20;
-  end if;
-
-  if char_length(clean_body) > 250
-    and (clean_body ~ '(.)\1{24,}' or clean_body ~ '[!?.,]{40,}') then
-    flags := array_append(flags, 'REPEATED_CHARACTERS');
-    score := score + 20;
-  end if;
-
-  if (
-      position(U&'\200B' in clean_body) > 0
-      or position(U&'\FEFF' in clean_body) > 0
-    )
-    and clean_body ~ '[[:alnum:]]' then
-    flags := array_append(flags, 'SUSPICIOUS_INVISIBLE_CHARACTERS');
-    score := score + 35;
   end if;
 
   if position(U&'\202A' in clean_body) > 0
@@ -258,7 +240,12 @@ begin
   elsif comparison_body ~ '(i am|i''m|im)\s+(an?\s+)?(admin|moderator)'
     or comparison_body ~ 'official\s+admin\s+announcement' then
     flags := array_append(flags, 'ADMIN_IMPERSONATION');
-    score := score + 35;
+    force_high := true;
+  end if;
+
+  if comparison_body ~ '(crypto giveaway|free crypto|send (crypto|bitcoin|btc|ethereum|eth)|seed phrase|wallet seed|double your money|airdrop claim|claim your airdrop)' then
+    flags := array_append(flags, 'SCAM');
+    force_high := true;
   end if;
 
   for term_record in
@@ -318,10 +305,7 @@ begin
         'OBFUSCATED_LINK',
         'UNSAFE_PROTOCOL',
         'SCRIPT_PAYLOAD',
-        'HTML_MARKUP',
-        'SUSPICIOUS_INVISIBLE_CHARACTERS',
         'BIDI_CONTROL_ABUSE',
-        'REPEATED_CHARACTERS',
         'PERSONAL_ATTACK',
         'HARASSMENT',
         'THREAT',
