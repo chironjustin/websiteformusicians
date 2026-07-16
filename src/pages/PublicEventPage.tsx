@@ -1,4 +1,5 @@
 import { Component, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemainingMilliseconds } from "@/lib/eventTiming";
 import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
@@ -189,6 +190,24 @@ function GlobalStyles() {
       padding: 1.25rem 0 0.7rem;
       margin-bottom: 0.5rem;
     }
+    .live-chat__pinned {
+      flex: 0 0 auto;
+      margin: 0 0 0.75rem;
+      padding: 0.55rem 0.65rem 0.6rem;
+      border: 1px solid rgba(0,255,65,0.22);
+      border-left: 2px solid ${GREEN};
+      background: rgba(0,255,65,0.055);
+      max-height: clamp(5.75rem, 16vh, 8.5rem);
+      overflow: hidden;
+    }
+    .live-chat__pinned-label {
+      margin: 0 0 0.35rem;
+      font-family: ${VT};
+      color: rgba(0,255,65,0.66);
+      font-size: 0.86rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
     .live-chat__messages {
       flex: 1 1 auto;
       min-height: 0;
@@ -250,8 +269,13 @@ function GlobalStyles() {
         flex: 1 1 0;
       }
       .live-chat__header,
+      .live-chat__pinned,
       .chat-composer {
         flex: 0 0 auto;
+      }
+      .live-chat__pinned {
+        max-height: clamp(5rem, 15vh, 7.5rem);
+        margin-bottom: 0.62rem;
       }
       .live-chat__messages {
         flex: 1 1 0;
@@ -1792,13 +1816,13 @@ function LiveAudioHeader({ title, audioUrl, audioSourceStatus, audioPipelineDiag
 }
 
 function LiveMessageStream({ messages, eventId, artistName, artistUrl, listenerCount, chatError }: { messages: ChatMessage[]; eventId: string; artistName: string; artistUrl: string; listenerCount: number | null; chatError: string | null }) {
-  const pinnedMessage = messages.find(message => message.is_pinned);
+  const pinnedMessage = messages.find(message => message.is_pinned && message.status === "approved");
   const feedMessages = pinnedMessage ? messages.filter(message => message.id !== pinnedMessage.id) : messages;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
   const wasNearBottomRef = useRef(true);
   const didInitialScrollRef = useRef(false);
-  const latestMessageId = messages[messages.length - 1]?.id ?? "";
+  const latestMessageId = feedMessages[feedMessages.length - 1]?.id ?? "";
 
   useEffect(() => {
     didInitialScrollRef.current = false;
@@ -1840,12 +1864,10 @@ function LiveMessageStream({ messages, eventId, artistName, artistUrl, listenerC
         <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.4)", fontSize: "1.05rem", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>listeners: {listenerCount ?? "—"}</p>
       </div>
       {chatError && <ChatUnavailableNotice />}
+      {pinnedMessage && (
+        <PinnedMessageArea message={pinnedMessage} artistName={artistName} artistUrl={artistUrl} />
+      )}
       <div ref={viewportRef} className="live-chat__messages" onScroll={updateNearBottom}>
-        {pinnedMessage && (
-          <div style={{ width: "min(100%, 620px)" }}>
-            <ChatMessageBubble message={pinnedMessage} artistName={artistName} artistUrl={artistUrl} pinnedArea />
-          </div>
-        )}
         {feedMessages.map(message => (
           <ChatMessageBubble key={message.id} message={message} artistName={artistName} artistUrl={artistUrl} />
         ))}
@@ -1855,22 +1877,44 @@ function LiveMessageStream({ messages, eventId, artistName, artistUrl, listenerC
   );
 }
 
+function PinnedMessageArea({ message, artistName, artistUrl }: { message: ChatMessage; artistName: string; artistUrl: string }) {
+  return (
+    <aside className="live-chat__pinned" aria-label="Pinned message">
+      <p className="live-chat__pinned-label">Pinned message</p>
+      <ChatMessageBubble message={message} artistName={artistName} artistUrl={artistUrl} pinnedArea />
+    </aside>
+  );
+}
+
 function ChatMessageBubble({ message, artistName, artistUrl, pinnedArea = false }: { message: ChatMessage; artistName: string; artistUrl: string; pinnedArea?: boolean }) {
   const displayName = message.is_admin ? artistName : message.display_name;
   const labels = getPublicMessageLabels(message);
+  const bodyStyle: CSSProperties = {
+    fontFamily: VT,
+    color: "#fff",
+    fontSize: pinnedArea ? "1.05rem" : "1.15rem",
+    lineHeight: 1.15,
+    overflowWrap: "anywhere",
+    ...(pinnedArea ? {
+      display: "-webkit-box",
+      WebkitLineClamp: 4,
+      WebkitBoxOrient: "vertical",
+      overflow: "hidden",
+    } : {}),
+  };
 
   return (
     <div style={{
       maxWidth: pinnedArea ? "100%" : "min(88%, 620px)",
-      borderLeft: `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
-      padding: "0.45rem 0 0.45rem 0.65rem",
-      background: message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
+      borderLeft: pinnedArea ? "0" : `2px solid ${message.is_highlighted ? GREEN : "rgba(0,255,65,0.3)"}`,
+      padding: pinnedArea ? "0" : "0.45rem 0 0.45rem 0.65rem",
+      background: !pinnedArea && message.is_highlighted ? "rgba(0,255,65,0.07)" : "transparent",
     }}>
       <div style={{ minWidth: 0 }}>
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "0.95rem", letterSpacing: "0.05em", overflowWrap: "anywhere" }}>
           {displayName}{labels.length > 0 ? ` ${labels.join(" ")}` : ""}
         </p>
-        <p style={{ fontFamily: VT, color: "#fff", fontSize: "1.15rem", lineHeight: 1.15, overflowWrap: "anywhere" }}>{message.body}</p>
+        <p style={bodyStyle} title={pinnedArea ? message.body : undefined}>{message.body}</p>
         {message.is_liked && <ArtistLikeIndicator artistUrl={artistUrl} />}
       </div>
     </div>

@@ -115,7 +115,10 @@ as $$
     and (
       (
         chat_messages.status = 'approved'
-        and chat_messages.published_at >= verified_participant.joined_at
+        and (
+          chat_messages.published_at >= verified_participant.joined_at
+          or chat_messages.is_pinned = true
+        )
       )
       or chat_messages.participant_id = p_participant_id
     )
