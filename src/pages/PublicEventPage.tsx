@@ -1587,6 +1587,7 @@ export default function PublicEventPage() {
           listenerCount={listenerCount}
           joinedIdentity={joinedIdentity}
           onJoin={setJoinedIdentity}
+          onListenerCount={setListenerCount}
           onMessageSubmitted={chat.refetch}
           live={authoritativeState === "live"}
           starting={waitingForLiveStatus}
@@ -1744,7 +1745,7 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
   );
 }
 
-function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, chatError, listenerCount, joinedIdentity, onJoin, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; chatError: string | null; listenerCount: number | null; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
+function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, chatError, listenerCount, joinedIdentity, onJoin, onListenerCount, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; chatError: string | null; listenerCount: number | null; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
   useEffect(() => {
     console.info("[live-chat-join-state]", {
       eventId,
@@ -1775,7 +1776,7 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
             {joinedIdentity ? (
               <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
             ) : (
-              <JoinChatPanel eventId={eventId} onJoin={onJoin} onListenerCount={setListenerCount} />
+              <JoinChatPanel eventId={eventId} onJoin={onJoin} onListenerCount={onListenerCount} />
             )}
           </div>
         </LiveChatErrorBoundary>
