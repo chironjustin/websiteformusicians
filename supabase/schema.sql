@@ -23,11 +23,25 @@ create table if not exists public.events (
   queue_paused boolean not null default false,
   next_auto_publish_at timestamptz,
   last_auto_published_at timestamptz,
+  current_queue_size integer not null default 0,
+  current_queue_band text,
+  last_calculated_delay_ms integer,
+  last_release_size integer not null default 0,
+  recent_fan_publish_count integer not null default 0,
+  publication_budget_per_minute integer not null default 20,
+  scheduler_version text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint events_status_check check (status in ('draft', 'upcoming', 'live', 'finished')),
   constraint events_duration_positive check (duration_hours is null or duration_hours > 0),
-  constraint events_end_after_start check (starts_at is null or ends_at is null or ends_at > starts_at)
+  constraint events_end_after_start check (starts_at is null or ends_at is null or ends_at > starts_at),
+  constraint events_chat_scheduler_counts_check check (
+    current_queue_size >= 0
+    and last_release_size >= 0
+    and recent_fan_publish_count >= 0
+    and publication_budget_per_minute > 0
+    and (last_calculated_delay_ms is null or last_calculated_delay_ms >= 0)
+  )
 );
 
 create index if not exists events_owner_id_idx on public.events(owner_id);

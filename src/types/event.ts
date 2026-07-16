@@ -20,6 +20,13 @@ export interface MusicEvent {
   queue_paused: boolean;
   next_auto_publish_at: string | null;
   last_auto_published_at: string | null;
+  current_queue_size: number;
+  current_queue_band: string | null;
+  last_calculated_delay_ms: number | null;
+  last_release_size: number;
+  recent_fan_publish_count: number;
+  publication_budget_per_minute: number;
+  scheduler_version: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -43,6 +50,13 @@ export type EditableEventFields = Pick<
   | "queue_paused"
   | "next_auto_publish_at"
   | "last_auto_published_at"
+  | "current_queue_size"
+  | "current_queue_band"
+  | "last_calculated_delay_ms"
+  | "last_release_size"
+  | "recent_fan_publish_count"
+  | "publication_budget_per_minute"
+  | "scheduler_version"
 >;
 
 export type CreateEventInput = Partial<Omit<EditableEventFields, "status">> & {

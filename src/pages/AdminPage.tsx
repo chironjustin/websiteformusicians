@@ -733,6 +733,38 @@ function formatQueuedAge(messages: ChatMessage[]) {
   return `${minutes}m ${seconds % 60}s`;
 }
 
+function formatDelay(milliseconds: number | null | undefined) {
+  if (!milliseconds || milliseconds <= 0) return "";
+  if (milliseconds < 1000) return `${milliseconds}ms`;
+  return `${(milliseconds / 1000).toFixed(milliseconds % 1000 === 0 ? 0 : 1)}s`;
+}
+
+function formatRelativeTime(value: string | null | undefined) {
+  if (!value) return "";
+  const deltaSeconds = Math.round((new Date(value).getTime() - Date.now()) / 1000);
+  const absSeconds = Math.abs(deltaSeconds);
+  const suffix = deltaSeconds >= 0 ? "from now" : "ago";
+  if (absSeconds < 60) return `${absSeconds}s ${suffix}`;
+  return `${Math.floor(absSeconds / 60)}m ${absSeconds % 60}s ${suffix}`;
+}
+
+function queuePaceLabel(band: string | null | undefined) {
+  switch (band) {
+    case "0-30":
+      return "about 1 every 3s";
+    case "31-100":
+      return "about 1 every 2s";
+    case "101-200":
+      return "about 1/s";
+    case "over-200":
+      return "fast, capped";
+    case "empty":
+      return "waiting";
+    default:
+      return "not calculated";
+  }
+}
+
 function getTrustedEventMessages(event: MusicEvent, messages: ChatMessage[] = []) {
   return messages.filter(message => message.event_id === event.id);
 }
@@ -1115,6 +1147,12 @@ function ChatModerationPanel({
   const [body, setBody] = useState("");
   const queuedCount = chat.grouped.queued.length;
   const oldestQueuedAge = formatQueuedAge(chat.grouped.queued);
+  const schedulerBand = event?.current_queue_band ?? "not calculated";
+  const schedulerDelay = formatDelay(event?.last_calculated_delay_ms);
+  const nextRelease = formatRelativeTime(event?.next_auto_publish_at);
+  const recentPublishes = event?.recent_fan_publish_count ?? 0;
+  const publishBudget = event?.publication_budget_per_minute ?? 20;
+  const lastReleaseSize = event?.last_release_size ?? 0;
 
   async function run(label: string, action: () => Promise<void>) {
     setBusy(true);
@@ -1186,6 +1224,9 @@ function ChatModerationPanel({
         </div>
         <p style={noteStyle}>
           {event?.auto_publish_enabled ? "Auto publish is on" : "Auto publish is off"} · {event?.queue_paused ? "paused" : "not paused"} · {queuedCount} queued{oldestQueuedAge ? ` · oldest ${oldestQueuedAge}` : ""}
+        </p>
+        <p style={noteStyle}>
+          Band {schedulerBand} · pace {queuePaceLabel(schedulerBand)} · recent {recentPublishes}/{publishBudget}/min · last release {lastReleaseSize || "none"}{schedulerDelay ? ` · next delay ${schedulerDelay}` : ""}{nextRelease ? ` · next ${nextRelease}` : ""}
         </p>
       </Panel>
 
