@@ -1554,6 +1554,7 @@ export default function PublicEventPage() {
           liveTarget={countdownTarget}
           eventId={event.id}
           messages={chat.messages}
+          listenerCount={listenerCount}
           joinedIdentity={joinedIdentity}
           onJoin={setJoinedIdentity}
           onMessageSubmitted={chat.refetch}
@@ -1690,7 +1691,7 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
   );
 }
 
-function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, joinedIdentity, onJoin, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
+function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, listenerCount, joinedIdentity, onJoin, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; listenerCount: number | null; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
   useEffect(() => {
     console.info("[live-chat-join-state]", {
       eventId,
