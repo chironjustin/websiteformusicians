@@ -59,14 +59,6 @@ function adminMessagesQuery() {
     .order("created_at", { ascending: true });
 }
 
-function approvedPublicMessagesQuery() {
-  return supabase
-    .from("chat_messages")
-    .select("*")
-    .order("published_at", { ascending: true, nullsFirst: false })
-    .order("id", { ascending: true });
-}
-
 export async function getPublicChatMessages(eventId: string, viewer?: { participantId: string; sessionId: string } | null) {
   if (viewer?.participantId && viewer.sessionId) {
     const { data, error } = await supabase.rpc("get_visitor_visible_chat_messages", {
@@ -79,13 +71,18 @@ export async function getPublicChatMessages(eventId: string, viewer?: { particip
     return (data ?? []) as ChatMessage[];
   }
 
-  const { data, error } = await approvedPublicMessagesQuery()
-    .eq("event_id", eventId)
-    .eq("status", "approved")
-    .returns<ChatMessage[]>();
+  return [];
+}
+
+export async function getEventListenerCount(eventId: string) {
+  assertEventId(eventId);
+  const { data, error } = await supabase.rpc("get_event_listener_count", {
+    p_event_id: eventId,
+  });
 
   if (error) throw new Error(error.message);
-  return data ?? [];
+  const payload = data as { count?: number } | null;
+  return typeof payload?.count === "number" ? payload.count : 0;
 }
 
 export async function getAdminChatMessages(eventId: string) {

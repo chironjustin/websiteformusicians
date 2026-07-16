@@ -48,6 +48,7 @@ export interface ChatParticipant {
   display_name: string;
   normalized_name: string;
   created_at: string;
+  joined_at: string;
   last_seen_at: string;
 }
 

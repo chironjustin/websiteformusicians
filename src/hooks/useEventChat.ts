@@ -13,7 +13,7 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode,
   const activeScopeRef = useRef("");
   const viewerKey = viewer ? `${viewer.participantId}:${viewer.sessionId}` : "";
 
-  const loadMessages = useCallback(async () => {
+  const loadMessages = useCallback(async (showLoading = true) => {
     const scope = `${mode}:${eventId ?? ""}:${viewerKey}`;
     activeScopeRef.current = scope;
 
@@ -24,7 +24,7 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode,
     }
 
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       const nextMessages = mode === "admin"
         ? await getAdminChatMessages(eventId)
         : await getPublicChatMessages(eventId, viewer);
@@ -60,7 +60,7 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode,
         "postgres_changes",
         { event: "*", schema: "public", table: "chat_messages", filter: `event_id=eq.${eventId}` },
         () => {
-          loadMessages();
+          loadMessages(false);
         },
       )
       .subscribe();
@@ -69,6 +69,14 @@ export function useEventChat(eventId: string | null | undefined, mode: ChatMode,
       supabase.removeChannel(channel);
     };
   }, [eventId, loadMessages, mode]);
+
+  useEffect(() => {
+    if (mode !== "public" || !eventId || !viewer) return;
+    const id = window.setInterval(() => {
+      loadMessages(false);
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [eventId, loadMessages, mode, viewer]);
 
   const grouped = useMemo(() => ({
     pending: messages.filter(message => message.status === "pending"),

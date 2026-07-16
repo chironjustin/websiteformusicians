@@ -4,6 +4,7 @@ import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
 import {
   ChatSubmissionError,
+  getEventListenerCount,
   joinEventChatIdentity,
   sendVisitorMessage,
 } from "@/services/chatService";
@@ -64,6 +65,7 @@ type JoinedChatIdentity = {
   participantId: string;
   sessionId: string;
   displayName: string;
+  joinedAt?: string;
 };
 
 function pad2(value: number) {
@@ -845,6 +847,7 @@ function readStoredChatIdentity(eventId: string): JoinedChatIdentity | null {
           participantId: parsed.participantId,
           sessionId: parsed.sessionId,
           displayName: parsed.displayName,
+          joinedAt: parsed.joinedAt,
         };
       }
     } catch {
@@ -932,6 +935,7 @@ export default function PublicEventPage() {
   const authoritativeState = event?.status ?? "upcoming";
   const waitingForLiveStatus = state === "live" && authoritativeState === "upcoming";
   const [joinedIdentity, setJoinedIdentity] = useState<JoinedChatIdentity | null>(null);
+  const [listenerCount, setListenerCount] = useState<number | null>(null);
   const chatViewer = useMemo(() => joinedIdentity ? {
     participantId: joinedIdentity.participantId,
     sessionId: joinedIdentity.sessionId,
@@ -950,6 +954,35 @@ export default function PublicEventPage() {
   useEffect(() => {
     setJoinedIdentity(event?.id ? readStoredChatIdentity(event.id) : null);
   }, [event?.id]);
+
+  useEffect(() => {
+    const eventId = event?.id;
+    if (!eventId || state !== "live") {
+      setListenerCount(null);
+      return;
+    }
+
+    let cancelled = false;
+    async function loadListenerCount() {
+      try {
+        const count = await getEventListenerCount(eventId);
+        if (!cancelled) setListenerCount(count);
+      } catch (err) {
+        console.warn("[live-chat-listeners]", {
+          eventId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        if (!cancelled) setListenerCount(null);
+      }
+    }
+
+    loadListenerCount();
+    const id = window.setInterval(loadListenerCount, 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [event?.id, state]);
 
   useEffect(() => {
     const currentEventId = event?.id ?? null;
@@ -1677,7 +1710,7 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
         <LiveAudioHeader title={title} audioUrl={audioUrl} audioSourceStatus={audioSourceStatus} audioPipelineDiagnostics={audioPipelineDiagnostics} startsAt={startsAt} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />
         <div className={`live-chat-layout ${joined ? "live-chat-layout--joined" : "live-chat-layout--prejoin"}`}>
-          <LiveMessageStream messages={messages} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} />
+          <LiveMessageStream messages={messages} joined={joined} eventId={eventId} artistName={artistName} artistUrl={artistUrl} listenerCount={listenerCount} />
           <BouncingArtistPortrait imageUrl={artistUrl} />
           {starting && (
             <p style={{ position: "absolute", top: "8.25rem", left: 0, right: 0, fontFamily: VT, color: "rgba(0,255,65,0.7)", fontSize: "1.1rem", letterSpacing: "0.06em", textAlign: "center" }}>
@@ -1687,7 +1720,7 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
           {joinedIdentity ? (
             <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
           ) : (
-            <JoinChatPanel eventId={eventId} onJoin={onJoin} />
+            <JoinChatPanel eventId={eventId} onJoin={onJoin} onListenerCount={setListenerCount} />
           )}
         </div>
       </div>
@@ -1709,7 +1742,7 @@ function LiveAudioHeader({ title, audioUrl, audioSourceStatus, audioPipelineDiag
   );
 }
 
-function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistName: string; artistUrl: string }) {
+function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl, listenerCount }: { messages: ChatMessage[]; joined: boolean; eventId: string; artistName: string; artistUrl: string; listenerCount: number | null }) {
   const pinnedMessage = messages.find(message => message.is_pinned);
   const feedMessages = pinnedMessage ? messages.filter(message => message.id !== pinnedMessage.id) : messages;
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -1772,7 +1805,7 @@ function LiveMessageStream({ messages, joined, eventId, artistName, artistUrl }:
     <section className="live-chat-stream--joined" style={{ opacity: messages.length > 0 ? 1 : 0.9 }}>
       <div className="live-chat__header">
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.45rem", letterSpacing: "0.22em" }}>live chat</p>
-        <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.4)", fontSize: "1.05rem", letterSpacing: "0.1em" }}>{messages.length} msgs</p>
+        <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.4)", fontSize: "1.05rem", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>listeners: {listenerCount ?? "—"}</p>
       </div>
       <div ref={viewportRef} className="live-chat__messages" onScroll={updateNearBottom}>
         {pinnedMessage && (
@@ -1838,7 +1871,7 @@ function ArtistLikeIndicator({ artistUrl }: { artistUrl: string }) {
   );
 }
 
-function JoinChatPanel({ eventId, onJoin }: { eventId: string; onJoin: (identity: JoinedChatIdentity) => void }) {
+function JoinChatPanel({ eventId, onJoin, onListenerCount }: { eventId: string; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void }) {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
 
@@ -1852,8 +1885,10 @@ function JoinChatPanel({ eventId, onJoin }: { eventId: string; onJoin: (identity
         participantId: participant.id,
         sessionId: participant.session_id,
         displayName: participant.display_name,
+        joinedAt: participant.joined_at,
       };
       storeChatIdentity(eventId, identity);
+      getEventListenerCount(eventId).then(onListenerCount).catch(() => undefined);
       console.info("[live-chat-join-state]", {
         eventId,
         joined: true,

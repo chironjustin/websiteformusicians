@@ -8,6 +8,7 @@ create table if not exists public.event_chat_participants (
   display_name text not null,
   normalized_name text not null,
   avatar_id text,
+  joined_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   constraint event_chat_participants_display_name_length check (char_length(display_name) between 1 and 16),
@@ -71,8 +72,12 @@ create table if not exists public.chat_messages (
 create unique index if not exists event_chat_participants_event_normalized_name_idx on public.event_chat_participants(event_id, normalized_name);
 create unique index if not exists event_chat_participants_event_session_idx on public.event_chat_participants(event_id, session_id) where session_id is not null;
 create index if not exists event_chat_participants_event_created_idx on public.event_chat_participants(event_id, created_at);
+create index if not exists event_chat_participants_event_joined_idx on public.event_chat_participants(event_id, joined_at);
 create index if not exists chat_messages_event_status_created_idx on public.chat_messages(event_id, status, created_at);
 create index if not exists chat_messages_event_published_idx on public.chat_messages(event_id, status, published_at, id) where status = 'approved';
+create index if not exists chat_messages_event_approved_published_cutoff_idx
+on public.chat_messages(event_id, published_at, id)
+where status = 'approved';
 create index if not exists chat_messages_event_pinned_created_idx on public.chat_messages(event_id, is_pinned desc, created_at);
 create index if not exists chat_messages_event_client_token_idx on public.chat_messages(event_id, client_token) where client_token is not null;
 create index if not exists chat_messages_event_participant_idx on public.chat_messages(event_id, participant_id) where participant_id is not null;
@@ -279,22 +284,13 @@ alter column message_id drop not null;
 
 grant insert on public.chat_messages to authenticated;
 revoke insert on public.chat_messages from anon;
+revoke select on public.chat_messages from anon;
+grant select on public.chat_messages to authenticated;
 revoke select, insert, update, delete on public.event_chat_participants from anon, authenticated;
 
 drop policy if exists "Public can read live event chat participants" on public.event_chat_participants;
 
 drop policy if exists "Public can read approved chat messages" on public.chat_messages;
-create policy "Public can read approved chat messages"
-on public.chat_messages
-for select
-using (
-  status = 'approved'
-  and exists (
-    select 1 from public.events
-    where events.id = chat_messages.event_id
-      and events.status in ('live', 'finished')
-  )
-);
 
 drop policy if exists "Visitors can submit pending chat messages" on public.chat_messages;
 
@@ -320,38 +316,93 @@ $$;
 revoke all on function public.get_visitor_chat_message_status(uuid, uuid, uuid) from public;
 grant execute on function public.get_visitor_chat_message_status(uuid, uuid, uuid) to anon, authenticated;
 
-create or replace function public.get_visitor_visible_chat_messages(
-  p_event_id uuid,
-  p_participant_id uuid,
-  p_session_id uuid
-)
-returns setof public.chat_messages
+create or replace function public.get_event_listener_count(p_event_id uuid)
+returns jsonb
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  select chat_messages.*
+  select jsonb_build_object(
+    'count',
+    coalesce((
+      select count(*)::integer
+      from public.event_chat_participants
+      where event_chat_participants.event_id = p_event_id
+    ), 0)
+  );
+$$;
+
+revoke all on function public.get_event_listener_count(uuid) from public;
+grant execute on function public.get_event_listener_count(uuid) to anon, authenticated;
+
+create or replace function public.get_visitor_visible_chat_messages(
+  p_event_id uuid,
+  p_participant_id uuid,
+  p_session_id uuid
+)
+returns table (
+  id uuid,
+  event_id uuid,
+  participant_id uuid,
+  display_name text,
+  body text,
+  status text,
+  client_token uuid,
+  is_admin boolean,
+  is_pinned boolean,
+  is_highlighted boolean,
+  is_liked boolean,
+  created_at timestamptz,
+  updated_at timestamptz,
+  published_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with verified_participant as (
+    select *
+    from public.event_chat_participants
+    where event_chat_participants.id = p_participant_id
+      and event_chat_participants.event_id = p_event_id
+      and event_chat_participants.session_id = p_session_id
+    limit 1
+  )
+  select
+    chat_messages.id,
+    chat_messages.event_id,
+    chat_messages.participant_id,
+    chat_messages.display_name,
+    chat_messages.body,
+    chat_messages.status,
+    case
+      when chat_messages.participant_id = p_participant_id then chat_messages.client_token
+      else null
+    end as client_token,
+    chat_messages.is_admin,
+    chat_messages.is_pinned,
+    chat_messages.is_highlighted,
+    chat_messages.is_liked,
+    chat_messages.created_at,
+    chat_messages.updated_at,
+    chat_messages.published_at
   from public.chat_messages
+  cross join verified_participant
   where chat_messages.event_id = p_event_id
-    and (
-      chat_messages.status = 'approved'
-      or (
-        chat_messages.participant_id = p_participant_id
-        and exists (
-          select 1
-          from public.event_chat_participants
-          where event_chat_participants.id = p_participant_id
-            and event_chat_participants.event_id = p_event_id
-            and event_chat_participants.session_id = p_session_id
-        )
-      )
-    )
     and exists (
       select 1
       from public.events
       where events.id = chat_messages.event_id
         and events.status in ('live', 'finished')
+    )
+    and (
+      (
+        chat_messages.status = 'approved'
+        and chat_messages.published_at >= verified_participant.joined_at
+      )
+      or chat_messages.participant_id = p_participant_id
     )
   order by
     chat_messages.is_pinned desc,
@@ -401,6 +452,7 @@ returns table (
   display_name text,
   normalized_name text,
   created_at timestamptz,
+  joined_at timestamptz,
   last_seen_at timestamptz
 )
 language plpgsql
@@ -473,6 +525,7 @@ begin
           existing_participant.display_name,
           existing_participant.normalized_name,
           existing_participant.created_at,
+          existing_participant.joined_at,
           existing_participant.last_seen_at;
       return;
     end if;
@@ -494,6 +547,7 @@ begin
         existing_participant.display_name,
         existing_participant.normalized_name,
         existing_participant.created_at,
+        existing_participant.joined_at,
         existing_participant.last_seen_at;
     return;
   end if;
@@ -542,6 +596,7 @@ begin
             session_id,
             display_name,
             normalized_name,
+            joined_at,
             last_seen_at
           )
           values (
@@ -549,6 +604,7 @@ begin
             p_session_id,
             candidate_name,
             normalized_candidate,
+            now(),
             now()
           )
           returning * into inserted_participant;
@@ -562,6 +618,7 @@ begin
             inserted_participant.display_name,
             inserted_participant.normalized_name,
             inserted_participant.created_at,
+            inserted_participant.joined_at,
             inserted_participant.last_seen_at;
         return;
       exception
@@ -582,6 +639,7 @@ begin
                 existing_participant.display_name,
                 existing_participant.normalized_name,
                 existing_participant.created_at,
+                existing_participant.joined_at,
                 existing_participant.last_seen_at;
             return;
           end if;
