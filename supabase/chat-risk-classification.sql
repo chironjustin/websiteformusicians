@@ -197,7 +197,8 @@ begin
     score := score + 20;
   end if;
 
-  if clean_body ~ '(.)\1{24,}' or clean_body ~ '[!?.,]{40,}' then
+  if char_length(clean_body) > 250
+    and (clean_body ~ '(.)\1{24,}' or clean_body ~ '[!?.,]{40,}') then
     flags := array_append(flags, 'REPEATED_CHARACTERS');
     score := score + 20;
   end if;
@@ -220,29 +221,6 @@ begin
     or position(U&'\2068' in clean_body) > 0 then
     flags := array_append(flags, 'BIDI_CONTROL_ABUSE');
     force_high := true;
-  end if;
-
-  if (length(clean_body) - length(replace(clean_body, chr(10), ''))) > 8 then
-    flags := array_append(flags, 'EXCESSIVE_LINES');
-    score := score + 20;
-  end if;
-
-  if clean_body ~ '\S{101,}' then
-    flags := array_append(flags, 'LONG_UNBROKEN_TOKEN');
-    score := score + 20;
-  end if;
-
-  mention_count := length(clean_body) - length(replace(clean_body, '@', ''));
-  if mention_count > 5 then
-    flags := array_append(flags, 'EXCESSIVE_MENTIONS');
-    score := score + 15;
-  end if;
-
-  alpha_count := char_length(regexp_replace(clean_body, '[^[:alpha:]]', '', 'g'));
-  upper_count := char_length(regexp_replace(clean_body, '[^[:upper:]]', '', 'g'));
-  if alpha_count >= 20 and upper_count::numeric / greatest(alpha_count, 1) > 0.8 then
-    flags := array_append(flags, 'EXCESSIVE_UPPERCASE');
-    score := score + 10;
   end if;
 
   if comparison_body ~ '(kill yourself|go die|i hope you die|i(''m| am|m) going to kill you)' then
@@ -321,7 +299,7 @@ begin
 
   if duplicate_count >= 2 then
     flags := array_append(flags, 'REPEATED_DUPLICATE');
-    force_high := true;
+    score := score + 30;
   elsif duplicate_count = 1 then
     flags := array_append(flags, 'RECENT_DUPLICATE');
     score := score + 30;
@@ -344,9 +322,6 @@ begin
         'SUSPICIOUS_INVISIBLE_CHARACTERS',
         'BIDI_CONTROL_ABUSE',
         'REPEATED_CHARACTERS',
-        'EXCESSIVE_LINES',
-        'LONG_UNBROKEN_TOKEN',
-        'EXCESSIVE_MENTIONS',
         'PERSONAL_ATTACK',
         'HARASSMENT',
         'THREAT',
