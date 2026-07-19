@@ -1642,6 +1642,8 @@ function ChatUnavailableNotice() {
 }
 
 function UpcomingPage({ title, artworkUrl, startsAt }: { title: string; artworkUrl: string; startsAt: string | null }) {
+  const hasArtwork = Boolean(artworkUrl.trim());
+
   return (
     <div style={{ position: "relative", minHeight: "100vh", background: BG, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: "clamp(2rem, 5vh, 4rem)", padding: "2rem" }}>
@@ -1649,7 +1651,7 @@ function UpcomingPage({ title, artworkUrl, startsAt }: { title: string; artworkU
         <p style={{ fontFamily: VT, fontSize: "clamp(1rem, 3vw, 1.6rem)", color: "rgba(255,255,255,0.55)", textAlign: "center", letterSpacing: "0.04em" }}>
           {title}
         </p>
-        <Artwork size={360} imageUrl={artworkUrl} />
+        {hasArtwork && <Artwork size={360} imageUrl={artworkUrl} />}
       </div>
     </div>
   );

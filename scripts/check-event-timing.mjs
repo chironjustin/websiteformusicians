@@ -88,6 +88,7 @@ assert(publicPage.includes("function ChatMessageBubble") && publicPage.includes(
 assert(publicPage.includes('useEventChat(state === "live" && chatViewer ? event?.id : undefined'), "Public chat subscription must only initialize after live state and verified chat identity exist.");
 assert(publicPage.includes("<LiveEventView"), "Public page must render a dedicated LiveEventView for the live state.");
 assert(publicPage.includes("function LiveEventView") && publicPage.includes("function UpcomingPage") && publicPage.includes("function FinishedPage"), "Public page must keep distinct stage components.");
+assert(publicPage.includes("const hasArtwork = Boolean(artworkUrl.trim())") && publicPage.includes("{hasArtwork && <Artwork size={360} imageUrl={artworkUrl} />}"), "Upcoming page must not render an empty artwork square when no artwork was uploaded.");
 assert(!publicPage.includes("function StatusPanel") && !publicPage.includes("function ChatDrawer"), "Public debug/status switcher and drawer path must not render publicly.");
 assert(!publicPage.includes("function LivePage"), "Live state must not use the old artwork-based LivePage.");
 assert(!publicPage.includes("Artwork size={320}"), "Live state must not mount the Upcoming artwork composition.");
