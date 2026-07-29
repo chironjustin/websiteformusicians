@@ -279,6 +279,12 @@ assert(deleteArchivedEventFunction.includes("storageObjectExists") && deleteArch
 assert(deleteArchivedEventFunction.includes("verifiedRemovedStorage") && deleteArchivedEventFunction.includes("notFoundBeforeDelete") && deleteArchivedEventFunction.includes("stillPresentStorage"), "Archived event deletion must separate verified removals, missing objects, and still-present objects.");
 
 const adminPage = readFileSync("src/pages/AdminPage.tsx", "utf8");
+assert(adminPage.includes("function ChatPreview") && adminPage.includes("maxHeight: \"clamp(360px, 70vh, 720px)\"") && adminPage.includes("overflowY: \"auto\"") && adminPage.includes("overflowX: \"hidden\""), "Admin live chat preview must use a bounded scrollable message region.");
+assert(adminPage.includes("const pinnedMessage = useMemo") && adminPage.includes("const highlightedMessage = useMemo") && adminPage.includes("const timelineMessages = useMemo"), "Admin live chat preview must derive pinned, highlighted, and timeline zones from canonical messages.");
+assert(adminPage.includes("message.id !== pinnedMessage?.id") && adminPage.includes("message.id !== highlightedMessage?.id"), "Admin live chat preview must exclude pinned and highlighted messages from the normal timeline.");
+assert(adminPage.includes("function comparePublishedTuple") && adminPage.includes("left.published_at.localeCompare(right.published_at)") && adminPage.includes("left.id.localeCompare(right.id)"), "Admin live chat preview must restore normal messages by published_at/id instead of updated_at or array order.");
+assert(adminPage.includes("position: \"sticky\"") && adminPage.includes("New messages") && adminPage.includes("nearBottomRef"), "Admin live chat preview must keep emphasis cards sticky and avoid forcing scrolled-up moderators to the bottom.");
+assert(adminPage.includes("ChatPreviewMessageCard") && adminPage.includes(">Highlighted</span>") && adminPage.includes(">Pinned</span>"), "Admin live chat preview cards must preserve moderation actions and visible pinned/highlighted badges.");
 assert(adminPage.includes(">Start Event<"), "Admin must expose a single Start Event action.");
 assert(!adminPage.includes(">Schedule Event<") && !adminPage.includes(">Start Now<"), "Admin must not expose Schedule Event or Start Now actions.");
 assert(adminPage.includes("getTrustedEventMessages") && adminPage.includes("message.event_id === event.id"), "Admin archive must keep archived messages scoped to their event id.");

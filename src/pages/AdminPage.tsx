@@ -1265,40 +1265,171 @@ function ChatModerationPanel({
 }
 
 function ChatPreview({ messages, busy, run }: { messages: ChatMessage[]; busy: boolean; run: (label: string, action: () => Promise<void>) => Promise<void> }) {
-  const sorted = useMemo(() => [...messages].sort((a, b) => {
-    if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
-    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-  }), [messages]);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
+  const nearBottomRef = useRef(true);
+  const [showNewMessages, setShowNewMessages] = useState(false);
+  const chronologicalMessages = useMemo(() => [...messages].sort(comparePublishedTuple), [messages]);
+  const pinnedMessage = useMemo(() => chronologicalMessages.find(message => message.is_pinned), [chronologicalMessages]);
+  const highlightedMessage = useMemo(
+    () => chronologicalMessages.find(message => message.is_highlighted && message.id !== pinnedMessage?.id),
+    [chronologicalMessages, pinnedMessage?.id],
+  );
+  const timelineMessages = useMemo(() => chronologicalMessages.filter(message => (
+    message.id !== pinnedMessage?.id
+    && message.id !== highlightedMessage?.id
+  )), [chronologicalMessages, highlightedMessage?.id, pinnedMessage?.id]);
+  const latestTimelineKey = timelineMessages.at(-1)?.id ?? "";
+
+  function updateNearBottom() {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    const nearBottom = distanceFromBottom < 96;
+    nearBottomRef.current = nearBottom;
+    if (nearBottom) setShowNewMessages(false);
+  }
+
+  function scrollToBottom(behavior: ScrollBehavior = "smooth") {
+    bottomAnchorRef.current?.scrollIntoView({ block: "end", behavior });
+    nearBottomRef.current = true;
+    setShowNewMessages(false);
+  }
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !latestTimelineKey) return;
+    if (nearBottomRef.current) {
+      requestAnimationFrame(() => scrollToBottom("auto"));
+    } else {
+      setShowNewMessages(true);
+    }
+  }, [latestTimelineKey]);
 
   return (
-    <Panel title={`LIVE CHAT PREVIEW (${sorted.length})`}>
-      <div style={{ border: "1px solid #111827", background: "#050505", color: "#f9fafb", borderRadius: 6, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-        {sorted.length === 0 && <p style={{ fontSize: 13, color: "#9ca3af" }}>No approved messages yet.</p>}
-        {sorted.map(message => (
-          <div key={message.id} style={{
-            border: message.is_highlighted ? "1px solid #00ff41" : "1px solid rgba(255,255,255,0.12)",
-            background: message.is_highlighted ? "rgba(0,255,65,0.12)" : "rgba(255,255,255,0.04)",
+    <Panel title={`LIVE CHAT PREVIEW (${messages.length})`}>
+      <div style={{ position: "relative" }}>
+        <div
+          ref={viewportRef}
+          onScroll={updateNearBottom}
+          tabIndex={0}
+          aria-label="Live chat preview messages"
+          style={{
+            border: "1px solid #111827",
+            background: "#050505",
+            color: "#f9fafb",
             borderRadius: 6,
-            padding: "10px 12px",
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
-              <strong style={{ fontSize: 12, color: "#fff" }}>{message.display_name}</strong>
-              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{formatChatTime(message.created_at)}</span>
-              {message.is_admin && <span style={darkBadgeStyle}>Admin</span>}
-              {message.is_pinned && <span style={darkBadgeStyle}>Pinned</span>}
+            padding: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            maxHeight: "clamp(360px, 70vh, 720px)",
+            overflowY: "auto",
+            overflowX: "hidden",
+            overscrollBehavior: "contain",
+          }}
+        >
+          {(pinnedMessage || highlightedMessage) && (
+            <div
+              style={{
+                position: "sticky",
+                top: -12,
+                zIndex: 2,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                margin: "-12px -12px 0",
+                padding: "12px 12px 10px",
+                background: "#050505",
+                borderBottom: "1px solid rgba(255,255,255,0.16)",
+                boxShadow: "0 10px 24px rgba(0,0,0,0.34)",
+              }}
+            >
+              {pinnedMessage && <ChatPreviewMessageCard message={pinnedMessage} busy={busy} run={run} variant="pinned" />}
+              {highlightedMessage && <ChatPreviewMessageCard message={highlightedMessage} busy={busy} run={run} variant="highlighted" />}
             </div>
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.82)", overflowWrap: "anywhere" }}>{message.body}</p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-              <SmallButton disabled={busy} onClick={() => run(message.is_pinned ? "Message unpinned." : "Message pinned.", () => setMessagePinned(message.id, !message.is_pinned))}>{message.is_pinned ? "Unpin" : "Pin"}</SmallButton>
-              <SmallButton disabled={busy} onClick={() => run(message.is_highlighted ? "Highlight removed." : "Message highlighted.", () => setMessageHighlighted(message.id, !message.is_highlighted))}>{message.is_highlighted ? "Remove Highlight" : "Highlight"}</SmallButton>
-              <SmallButton disabled={busy} onClick={() => run(message.is_liked ? "Artist reaction removed." : "Artist reaction added.", () => updateMessageFlags(message.id, { is_liked: !message.is_liked }).then(() => undefined))}>{message.is_liked ? "Unlike" : "Like as Artist"}</SmallButton>
-              <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(message.id))}>Delete</SmallButton>
-            </div>
-          </div>
-        ))}
+          )}
+
+          {messages.length === 0 && <p style={{ fontSize: 13, color: "#9ca3af" }}>No approved messages yet.</p>}
+          {timelineMessages.map(message => (
+            <ChatPreviewMessageCard key={message.id} message={message} busy={busy} run={run} variant="normal" />
+          ))}
+          <div ref={bottomAnchorRef} aria-hidden="true" />
+        </div>
+        {showNewMessages && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom()}
+            style={{
+              position: "absolute",
+              left: "50%",
+              bottom: 14,
+              transform: "translateX(-50%)",
+              border: "1px solid rgba(0,255,65,0.55)",
+              background: "#07140b",
+              color: "#00ff41",
+              borderRadius: 999,
+              padding: "6px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+            }}
+          >
+            New messages
+          </button>
+        )}
       </div>
     </Panel>
   );
+}
+
+function ChatPreviewMessageCard({ message, busy, run, variant }: { message: ChatMessage; busy: boolean; run: (label: string, action: () => Promise<void>) => Promise<void>; variant: "pinned" | "highlighted" | "normal" }) {
+  const emphasized = variant === "pinned" || variant === "highlighted" || message.is_highlighted;
+  const borderColor = variant === "pinned"
+    ? "rgba(0,255,65,0.7)"
+    : emphasized
+      ? "#00ff41"
+      : "rgba(255,255,255,0.12)";
+  const background = variant === "pinned"
+    ? "rgba(0,255,65,0.18)"
+    : emphasized
+      ? "rgba(0,255,65,0.12)"
+      : "rgba(255,255,255,0.04)";
+
+  return (
+    <div style={{
+      border: `1px solid ${borderColor}`,
+      background,
+      borderRadius: 6,
+      padding: "10px 12px",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
+        <strong style={{ fontSize: 12, color: "#fff" }}>{message.display_name}</strong>
+        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{formatChatTime(message.published_at ?? message.created_at)}</span>
+        {message.is_admin && <span style={darkBadgeStyle}>Admin</span>}
+        {message.is_pinned && <span style={darkBadgeStyle}>Pinned</span>}
+        {message.is_highlighted && <span style={darkBadgeStyle}>Highlighted</span>}
+      </div>
+      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.82)", overflowWrap: "anywhere" }}>{message.body}</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+        <SmallButton disabled={busy} onClick={() => run(message.is_pinned ? "Message unpinned." : "Message pinned.", () => setMessagePinned(message.id, !message.is_pinned))}>{message.is_pinned ? "Unpin" : "Pin"}</SmallButton>
+        <SmallButton disabled={busy} onClick={() => run(message.is_highlighted ? "Highlight removed." : "Message highlighted.", () => setMessageHighlighted(message.id, !message.is_highlighted))}>{message.is_highlighted ? "Remove Highlight" : "Highlight"}</SmallButton>
+        <SmallButton disabled={busy} onClick={() => run(message.is_liked ? "Artist reaction removed." : "Artist reaction added.", () => updateMessageFlags(message.id, { is_liked: !message.is_liked }).then(() => undefined))}>{message.is_liked ? "Unlike" : "Like as Artist"}</SmallButton>
+        <SmallButton disabled={busy} color="#6b7280" onClick={() => run("Message deleted.", () => deleteChatMessage(message.id))}>Delete</SmallButton>
+      </div>
+    </div>
+  );
+}
+
+function comparePublishedTuple(left: ChatMessage, right: ChatMessage) {
+  if (left.published_at && right.published_at) {
+    const byPublishedAt = left.published_at.localeCompare(right.published_at);
+    if (byPublishedAt !== 0) return byPublishedAt;
+  } else if (left.published_at !== right.published_at) {
+    return left.published_at ? -1 : 1;
+  }
+
+  return left.id.localeCompare(right.id);
 }
 
 function ChatSection({ title, empty, messages, children }: { title: string; empty: string; messages: ChatMessage[]; children: (message: ChatMessage) => React.ReactNode }) {
