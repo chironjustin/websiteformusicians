@@ -6,7 +6,20 @@
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "build": "vite build",
-    "dev": "vite"
+    "dev": "vite",
+    "loadtest:dry-run": "k6 run load-tests/chat-listening-event/scenarios/dry-run.js",
+    "loadtest:check": "node scripts/check-load-tests.mjs",
+    "loadtest:smoke": "k6 run load-tests/chat-listening-event/scenarios/smoke.js",
+    "loadtest:ramp": "k6 run load-tests/chat-listening-event/scenarios/ramp.js",
+    "loadtest:passive-10k": "k6 run load-tests/chat-listening-event/scenarios/passive-10k.js",
+    "loadtest:mixed-10k": "k6 run load-tests/chat-listening-event/scenarios/mixed-10k.js",
+    "loadtest:peak-10k": "k6 run load-tests/chat-listening-event/scenarios/peak-10k.js",
+    "loadtest:rate-limit": "k6 run load-tests/chat-listening-event/scenarios/rate-limit.js",
+    "loadtest:queue": "k6 run load-tests/chat-listening-event/scenarios/queue.js",
+    "loadtest:scheduler-concurrency": "k6 run load-tests/chat-listening-event/scenarios/scheduler-concurrency.js",
+    "loadtest:pause-resume": "k6 run load-tests/chat-listening-event/scenarios/pause-resume.js",
+    "loadtest:soak-short": "k6 run load-tests/chat-listening-event/scenarios/soak-short.js",
+    "loadtest:soak-8h": "k6 run load-tests/chat-listening-event/scenarios/soak-8h.js"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

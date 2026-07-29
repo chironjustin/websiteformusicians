@@ -1,5 +1,17 @@
 import { supabase } from "@/lib/supabase";
-import type { ChatMessage, ChatMessageStatus, ChatParticipant, CreateAdminChatMessageInput, CreateVisitorChatMessageInput, VisitorSubmittedChatMessage } from "@/types/chat";
+import type {
+  ChatMessage,
+  ChatMessageStatus,
+  ChatParticipant,
+  CreateAdminChatMessageInput,
+  CreateVisitorChatMessageInput,
+  VisitorChatMessageDelta,
+  VisitorPrivateCursor,
+  VisitorPublicCursor,
+  VisitorPublicUpdateCursor,
+  VisitorSubmittedChatMessage,
+  VisitorVisibleChatMessage,
+} from "@/types/chat";
 
 const CHAT_SESSION_KEY = "music-event-chat-session-id";
 const MAX_ADMIN_DISPLAY_NAME = 50;
@@ -68,10 +80,39 @@ export async function getPublicChatMessages(eventId: string, viewer?: { particip
     });
 
     if (error) throw new Error(error.message);
-    return (data ?? []) as ChatMessage[];
+    return (data ?? []) as VisitorVisibleChatMessage[];
   }
 
   return [];
+}
+
+export async function getPublicChatMessageDelta(
+  eventId: string,
+  viewer: { participantId: string; sessionId: string },
+  cursor: {
+    publicCursor?: VisitorPublicCursor;
+    publicUpdateCursor?: VisitorPublicUpdateCursor;
+    privateCursor?: VisitorPrivateCursor;
+    limit?: number;
+  } = {},
+) {
+  if (!viewer.participantId || !viewer.sessionId) return [];
+
+  const { data, error } = await supabase.rpc("get_visitor_visible_chat_message_delta", {
+    p_event_id: eventId,
+    p_participant_id: viewer.participantId,
+    p_session_id: viewer.sessionId,
+    p_after_published_at: cursor.publicCursor?.publishedAt ?? null,
+    p_after_id: cursor.publicCursor?.id ?? null,
+    p_after_public_updated_at: cursor.publicUpdateCursor?.updatedAt ?? null,
+    p_after_public_updated_id: cursor.publicUpdateCursor?.id ?? null,
+    p_after_private_updated_at: cursor.privateCursor?.updatedAt ?? null,
+    p_after_private_id: cursor.privateCursor?.id ?? null,
+    p_limit: cursor.limit ?? 200,
+  });
+
+  if (error) throw new Error(error.message);
+  return (data ?? []) as VisitorChatMessageDelta[];
 }
 
 export async function getEventListenerCount(eventId: string) {

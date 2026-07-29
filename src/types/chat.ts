@@ -41,6 +41,30 @@ export type VisitorSubmittedChatMessage = Pick<
   "id" | "event_id" | "participant_id" | "display_name" | "body" | "status" | "client_token" | "created_at" | "published_at"
 >;
 
+export type VisitorVisibleChatMessage = Pick<
+  ChatMessage,
+  "id" | "event_id" | "participant_id" | "display_name" | "body" | "status" | "client_token" | "is_admin" | "is_pinned" | "is_highlighted" | "is_liked" | "created_at" | "updated_at" | "published_at"
+>;
+
+export type VisitorChatMessageDelta = VisitorVisibleChatMessage & {
+  visibility_scope: "active_pin" | "public_new" | "public_update" | "own";
+};
+
+export type VisitorPublicCursor = {
+  publishedAt: string;
+  id: string;
+} | null;
+
+export type VisitorPrivateCursor = {
+  updatedAt: string;
+  id: string;
+} | null;
+
+export type VisitorPublicUpdateCursor = {
+  updatedAt: string;
+  id: string;
+} | null;
+
 export interface ChatParticipant {
   id: string;
   event_id: string;
