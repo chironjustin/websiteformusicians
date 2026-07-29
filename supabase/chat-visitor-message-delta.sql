@@ -35,7 +35,7 @@ returns table (
 language sql
 stable
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
   with request as (
     select
@@ -175,9 +175,9 @@ as $$
       and chat_messages.published_at <= request.snapshot_at
       and chat_messages.published_at >= verified_participant.joined_at
       and chat_messages.updated_at <= request.snapshot_at
-      and p_after_public_updated_at is not null
       and (
-        chat_messages.updated_at > p_after_public_updated_at
+        p_after_public_updated_at is null
+        or chat_messages.updated_at > p_after_public_updated_at
         or (
           chat_messages.updated_at = p_after_public_updated_at
           and (
@@ -235,14 +235,7 @@ as $$
     union all
     select * from public_update_delta
     union all
-    select * from private_delta
-  order by
-    is_pinned desc,
-    case
-      when participant_id = p_participant_id then created_at
-      else published_at
-    end asc nulls last,
-    id asc;
+    select * from private_delta;
 $$;
 
 drop function if exists public.get_visitor_visible_chat_message_delta(uuid, uuid, uuid, timestamptz, uuid, timestamptz, uuid, integer);

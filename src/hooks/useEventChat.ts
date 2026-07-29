@@ -265,11 +265,6 @@ function advanceDeltaCursors(
         publicCursorRef.current = { publishedAt: message.published_at, id: message.id };
         advanced.publicNew = true;
       }
-
-      const publicUpdateCursor = publicUpdateCursorRef.current;
-      if (!publicUpdateCursor || compareCursorTuple(message.updated_at, message.id, publicUpdateCursor.updatedAt, publicUpdateCursor.id) > 0) {
-        publicUpdateCursorRef.current = { updatedAt: message.updated_at, id: message.id };
-      }
     }
   }
 
