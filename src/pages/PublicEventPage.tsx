@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useRef, useState } from "react";
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { formatCountdown, getCountdownTarget, getEventDisplayState, getRemainingMilliseconds } from "@/lib/eventTiming";
 import { useEventChat } from "@/hooks/useEventChat";
@@ -155,12 +155,12 @@ function GlobalStyles() {
       min-height: 100vh;
       background: ${BG};
       overflow: hidden;
-      padding: 2.2rem 1.75rem 1.25rem;
+      padding: calc(2.2rem + env(safe-area-inset-top)) 1.75rem calc(1.25rem + env(safe-area-inset-bottom));
     }
     .live-event-content {
       position: relative;
       z-index: 10;
-      height: calc(100vh - 3.5rem);
+      height: calc(100vh - 3.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
       min-height: 0;
       display: flex;
       flex-direction: column;
@@ -242,13 +242,14 @@ function GlobalStyles() {
         min-height: 100dvh;
       }
       .live-event-content {
-        height: calc(100dvh - 3.5rem);
+        height: calc(100dvh - 3.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
       }
     }
     @media (max-width: 640px) {
       .live-event-view {
         height: 100vh;
-        padding: 2rem 1.35rem 0;
+        min-height: 100vh;
+        padding: calc(2rem + env(safe-area-inset-top)) 1.35rem env(safe-area-inset-bottom);
       }
       .live-event-content,
       .live-chat-layout,
@@ -293,6 +294,7 @@ function GlobalStyles() {
       @media (max-width: 640px) {
         .live-event-view {
           height: 100dvh;
+          min-height: 100dvh;
         }
       }
     }
@@ -1756,6 +1758,40 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
 }
 
 function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, chatError, listenerCount, joinedIdentity, onJoin, onListenerCount, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; chatError: string | null; listenerCount: number | null; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
+  const stageScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const historyObject = window.history;
+    const previousRestoration = historyObject.scrollRestoration;
+    historyObject.scrollRestoration = "manual";
+    return () => {
+      historyObject.scrollRestoration = previousRestoration;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (joinedIdentity) return;
+
+    const resetScroll = () => {
+      const stage = stageScrollRef.current;
+      const shell = stage?.closest(".public-event-shell") as HTMLElement | null;
+      const scrollingElement = document.scrollingElement as HTMLElement | null;
+      const elements = [stage, shell, scrollingElement, document.documentElement, document.body].filter(Boolean) as HTMLElement[];
+
+      for (const element of elements) {
+        element.scrollTo?.({ top: 0, left: 0, behavior: "auto" });
+        element.scrollTop = 0;
+        element.scrollLeft = 0;
+      }
+
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    };
+
+    resetScroll();
+    const frame = window.requestAnimationFrame(resetScroll);
+    return () => window.cancelAnimationFrame(frame);
+  }, [eventId, joinedIdentity]);
+
   useEffect(() => {
     console.info("[live-chat-join-state]", {
       eventId,
@@ -1768,7 +1804,7 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
   }, [audioPipelineDiagnostics.audioPathPresent, audioPipelineDiagnostics.finalAudioUrlPresent, audioPipelineDiagnostics.signingRequest, audioPipelineDiagnostics.sourceIdentity, eventId, joinedIdentity]);
 
   return (
-    <div className="live-event-view">
+    <div ref={stageScrollRef} className="live-event-view">
       <div className="live-event-content">
         <LiveAudioHeader title={title} audioUrl={audioUrl} audioSourceStatus={audioSourceStatus} audioPipelineDiagnostics={audioPipelineDiagnostics} startsAt={startsAt} liveTarget={liveTarget} />
         <div style={{ height: 1, background: "rgba(0,255,65,0.08)", margin: "1.25rem 0 0" }} />

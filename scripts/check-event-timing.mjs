@@ -154,6 +154,9 @@ assert(chatService.includes("p_message_id") && chatService.includes("p_pinned") 
 
 const publicLivePage = readFileSync("src/pages/PublicEventPage.tsx", "utf8");
 assert(publicLivePage.includes("live ends {label}"), "Live header must show the compact event-end countdown label.");
+assert(publicLivePage.includes("useLayoutEffect") && publicLivePage.includes("stageScrollRef") && publicLivePage.includes("window.requestAnimationFrame(resetScroll)") && publicLivePage.includes('behavior: "auto"'), "Mobile Join Chat stage must reset the real scroll containers after rendering without smooth scrolling.");
+assert(publicLivePage.includes('historyObject.scrollRestoration = "manual"') && publicLivePage.includes("document.documentElement") && publicLivePage.includes("document.body"), "Mobile Join Chat stage must guard against Safari stale document scroll restoration.");
+assert(publicLivePage.includes("min-height: 100dvh") && publicLivePage.includes("height: 100dvh") && publicLivePage.includes("env(safe-area-inset-top)") && publicLivePage.includes("env(safe-area-inset-bottom)"), "Live stage must use dynamic viewport sizing and safe-area insets for mobile Safari.");
 
 const chatSchema = readFileSync("supabase/chat-schema.sql", "utf8");
 assert(chatSchema.includes("event_id uuid references public.events") && chatSchema.includes("client_token uuid"), "Chat schema must associate messages with events and pending-status client tokens.");
