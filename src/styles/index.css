@@ -1,5 +1,16 @@
 @import './fonts.css';
 
+*,
+::after,
+::before,
+::backdrop,
+::file-selector-button {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0 solid;
+}
+
 html,
 body,
 #root {
@@ -10,4 +21,18 @@ body {
   margin: 0;
   background: #000000;
   color: #ffffff;
+}
+
+button,
+input,
+select,
+optgroup,
+textarea,
+::file-selector-button {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  border-radius: 0;
+  background-color: transparent;
+  opacity: 1;
 }
