@@ -5,6 +5,7 @@ import { useEventChat } from "@/hooks/useEventChat";
 import { useCurrentEvent } from "@/hooks/useCurrentEvent";
 import {
   ChatSubmissionError,
+  ChatJoinError,
   getEventListenerCount,
   joinEventChatIdentity,
   sendVisitorMessage,
@@ -1822,7 +1823,7 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
                 <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
               </>
             ) : (
-              <JoinChatPanel eventId={eventId} listenerCount={listenerCount} onJoin={onJoin} onListenerCount={onListenerCount} />
+              <JoinChatPanel eventId={eventId} eventTitle={title} listenerCount={listenerCount} previewFull={isLocalChatFullPreviewEnabled()} onJoin={onJoin} onListenerCount={onListenerCount} />
             )}
           </div>
         </LiveChatErrorBoundary>
@@ -1977,12 +1978,21 @@ function ArtistLikeIndicator({ artistUrl }: { artistUrl: string }) {
   );
 }
 
-function JoinChatPanel({ eventId, listenerCount, onJoin, onListenerCount }: { eventId: string; listenerCount: number | null; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void }) {
+type JoinChatPanelVariant = "join" | "full";
+
+function JoinChatPanel({ eventId, eventTitle, listenerCount, previewFull, onJoin, onListenerCount }: { eventId: string; eventTitle: string; listenerCount: number | null; previewFull: boolean; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void }) {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
+  const [variant, setVariant] = useState<JoinChatPanelVariant>(previewFull ? "full" : "join");
+
+  useEffect(() => {
+    setVariant(previewFull ? "full" : "join");
+    setError("");
+  }, [previewFull]);
 
   async function join(event: React.FormEvent) {
     event.preventDefault();
+
     setJoining(true);
     setError("");
     try {
@@ -2002,24 +2012,83 @@ function JoinChatPanel({ eventId, listenerCount, onJoin, onListenerCount }: { ev
       });
       onJoin(identity);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "could not join chat.");
+      if (err instanceof ChatJoinError && err.code === "CHAT_CAPACITY_FULL") {
+        setVariant("full");
+        setError("");
+      } else {
+        setError(err instanceof Error ? err.message : "could not join chat.");
+      }
     } finally {
       setJoining(false);
     }
   }
 
+  const content = getJoinChatPanelContent(variant, eventTitle);
+  const contentStyle: React.CSSProperties = variant === "full"
+    ? {
+      textAlign: "center",
+      display: "grid",
+      gap: "0.9rem",
+      border: "1px solid rgba(0,255,65,0.22)",
+      background: "rgba(0,255,65,0.055)",
+      padding: "1.1rem 1rem",
+    }
+    : {
+      textAlign: "center",
+      display: "grid",
+      gap: "0.9rem",
+    };
+
   return (
     <form onSubmit={join} style={{ position: "absolute", left: "50%", bottom: "clamp(8.5rem, 18vh, 13rem)", transform: "translateX(-50%)", width: "min(350px, 82vw)", display: "grid", gap: "1.25rem", zIndex: 3 }}>
-      <div style={{ textAlign: "center", display: "grid", gap: "0.9rem" }}>
-        <p style={{ fontFamily: PSP, fontSize: "clamp(1rem, 4vw, 1.55rem)", color: "#FFFFFF", letterSpacing: "0.06em" }}>join chat</p>
-        <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.45)", fontSize: "1.05rem", letterSpacing: "0.1em", margin: 0 }}>listeners: {listenerCount ?? "—"}</p>
+      <div style={contentStyle}>
+        <p style={{ fontFamily: PSP, fontSize: "clamp(1rem, 4vw, 1.55rem)", color: content.titleColor, letterSpacing: "0.06em" }}>{content.title}</p>
+        {content.description ? (
+          <p style={{ fontFamily: VT, color: content.descriptionColor, fontSize: "1.05rem", lineHeight: 1.18, letterSpacing: "0.04em", margin: 0, whiteSpace: "pre-line" }}>
+            {content.description}
+          </p>
+        ) : (
+          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.45)", fontSize: "1.05rem", letterSpacing: "0.1em", margin: 0 }}>listeners: {listenerCount ?? "—"}</p>
+        )}
       </div>
-      <button disabled={joining} style={enterButtonStyle}>
-        [ join ]
-      </button>
+      {variant === "join" && (
+        <button disabled={joining} style={enterButtonStyle}>
+          {content.buttonLabel}
+        </button>
+      )}
       {error && <p style={{ fontFamily: VT, color: "#ff5c5c", fontSize: "0.95rem", textAlign: "center" }}>{error}</p>}
     </form>
   );
+}
+
+function getJoinChatPanelContent(variant: JoinChatPanelVariant, eventTitle: string) {
+  if (variant === "full") {
+    const trimmedEventTitle = eventTitle.trim();
+    const listeningCopy = trimmedEventTitle
+      ? `but you can continue listening to ${trimmedEventTitle} <3.`
+      : "but you can continue listening <3.";
+
+    return {
+      title: "live chat is full.",
+      description: listeningCopy,
+      buttonLabel: "",
+      titleColor: "#FFFFFF",
+      descriptionColor: "rgba(255,255,255,0.68)",
+    };
+  }
+
+  return {
+    title: "join chat",
+    description: "",
+    buttonLabel: "[ join ]",
+    titleColor: "#FFFFFF",
+    descriptionColor: "rgba(0,255,65,0.45)",
+  };
+}
+
+function isLocalChatFullPreviewEnabled() {
+  if (import.meta.env.PROD || typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("previewChatFull") === "1";
 }
 
 const VISITOR_MESSAGE_LIMIT = 400;

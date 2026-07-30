@@ -17,6 +17,7 @@ const anonKey = env("LOAD_TEST_SUPABASE_ANON_KEY");
 const eventId = env("LOAD_TEST_EVENT_ID");
 const environment = env("LOAD_TEST_ENVIRONMENT");
 const confirmed = env("LOAD_TEST_CONFIRMED");
+const generationEnabled = env("LOAD_TEST_PARTICIPANT_GENERATION_ENABLED") === "true";
 const count = Number.parseInt(arg("count", "10"), 10);
 const out = arg("out", `load-tests/chat-listening-event/results/provisioned-${Date.now()}.json`);
 
@@ -32,8 +33,12 @@ if (count > 100 && confirmed !== CONFIRMATION) {
   throw new Error(`Refusing to provision ${count} participants without LOAD_TEST_CONFIRMED=${CONFIRMATION}.`);
 }
 
-if (environment.toLowerCase() === "production" || environment.toLowerCase() === "prod") {
-  throw new Error("Refusing participant provisioning in production.");
+if (!["staging", "load-test"].includes(environment.toLowerCase())) {
+  throw new Error("Participant provisioning requires LOAD_TEST_ENVIRONMENT=staging or load-test.");
+}
+
+if (!generationEnabled) {
+  throw new Error("Set LOAD_TEST_PARTICIPANT_GENERATION_ENABLED=true only for a dedicated load-test fixture event.");
 }
 
 const headers = {

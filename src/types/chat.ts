@@ -73,7 +73,6 @@ export interface ChatParticipant {
   normalized_name: string;
   created_at: string;
   joined_at: string;
-  last_seen_at: string;
 }
 
 export interface CreateVisitorChatMessageInput {

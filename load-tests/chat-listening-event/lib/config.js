@@ -2,6 +2,7 @@ import { fail } from "k6";
 
 const CONFIRMATION = "I_UNDERSTAND_THIS_LOAD_TEST";
 const PRODUCTION_CONFIRMATION = "AUTHORIZED_PRODUCTION_LOAD_TEST";
+const HIGH_LOAD_CONFIRMATION = "true";
 
 export function getEnv(name, fallback = "") {
   const value = __ENV[name];
@@ -43,10 +44,13 @@ export function buildConfig(scenarioName, defaults) {
   const config = {
     scenarioName,
     baseUrl: requireEnv("LOAD_TEST_BASE_URL").replace(/\/+$/, ""),
+    targetUrl: getEnv("LOAD_TEST_TARGET_URL", requireEnv("LOAD_TEST_BASE_URL")).replace(/\/+$/, ""),
+    allowedHost: requireEnv("LOAD_TEST_ALLOWED_HOST"),
     supabaseUrl: requireEnv("LOAD_TEST_SUPABASE_URL").replace(/\/+$/, ""),
     supabaseAnonKey: requireEnv("LOAD_TEST_SUPABASE_ANON_KEY"),
     supabaseAccessToken: getEnv("LOAD_TEST_SUPABASE_ACCESS_TOKEN"),
     supabaseServiceRoleKey: getEnv("LOAD_TEST_SUPABASE_SERVICE_ROLE_KEY"),
+    adminUserId: getEnv("LOAD_TEST_ADMIN_USER_ID"),
     eventId: requireEnv("LOAD_TEST_EVENT_ID"),
     environment: requireEnv("LOAD_TEST_ENVIRONMENT"),
     authMode: getEnv("LOAD_TEST_AUTH_MODE", "anon"),
@@ -62,6 +66,8 @@ export function buildConfig(scenarioName, defaults) {
     messageFetchEvery: getInt("LOAD_TEST_MESSAGE_FETCH_EVERY", 1),
     messagePageLimit: getInt("LOAD_TEST_MESSAGE_PAGE_LIMIT", 200),
     maxVus: getInt("LOAD_TEST_MAX_VUS", defaults.vus ?? defaults.maxVus ?? 10),
+    stage: getEnv("LOAD_TEST_STAGE", ""),
+    scenarioKind: getEnv("LOAD_TEST_SCENARIO", scenarioName),
     duration: getEnv("LOAD_TEST_DURATION", defaults.duration ?? "5m"),
     writeScenario: defaults.writeScenario ?? false,
     largeScenario: defaults.largeScenario ?? false,
@@ -79,6 +85,10 @@ export function buildConfig(scenarioName, defaults) {
     expectedRateLimitCode: getEnv("LOAD_TEST_RATE_LIMIT_CODE", "MESSAGE_RATE_LIMITED"),
     controlledWorkerEnabled: getBool("LOAD_TEST_WORKER_INVOCATION_ENABLED", false),
     adminWriteEnabled: getBool("LOAD_TEST_ADMIN_WRITE_ENABLED", false),
+    adminPublicationEnabled: getBool("LOAD_TEST_ADMIN_PUBLICATION_ENABLED", false),
+    participantGenerationEnabled: getBool("LOAD_TEST_PARTICIPANT_GENERATION_ENABLED", false),
+    confirmHighLoad: getEnv("LOAD_TEST_CONFIRM_HIGH_LOAD"),
+    lowerStagesPassed: getBool("LOAD_TEST_LOWER_STAGES_PASSED", false),
   };
 
   validateConfig(config);
@@ -98,8 +108,25 @@ export function validateConfig(config) {
     fail("This scenario/auth mode requires LOAD_TEST_SUPABASE_ACCESS_TOKEN. Do not use production tokens unless an approved production test window exists.");
   }
 
+  if (config.adminPublicationEnabled && (!config.supabaseAccessToken || !config.adminUserId)) {
+    fail("LOAD_TEST_ADMIN_PUBLICATION_ENABLED=true requires LOAD_TEST_SUPABASE_ACCESS_TOKEN and LOAD_TEST_ADMIN_USER_ID for a staging event owner.");
+  }
+
   if (config.includeRealtime) {
     fail("LOAD_TEST_REALTIME_ENABLED is reserved for a future Supabase Realtime protocol scenario. Current suite models the app's cutoff-aware cursor-delta HTTP path.");
+  }
+
+  if (!["staging", "load-test"].includes(config.environment.toLowerCase())) {
+    fail("LOAD_TEST_ENVIRONMENT must equal staging or load-test.");
+  }
+
+  const targetHost = safeHost(config.targetUrl || config.baseUrl);
+  if (!targetHost || targetHost !== config.allowedHost) {
+    fail(`Target host ${targetHost || "invalid"} must match LOAD_TEST_ALLOWED_HOST=${config.allowedHost}.`);
+  }
+
+  if (/prod/i.test(config.environment) || targetHost.includes("websiteformusicians.com")) {
+    fail("Production-like load-test target refused.");
   }
 
   if (config.writeScenario && !config.writeEnabled) {
@@ -108,6 +135,14 @@ export function validateConfig(config) {
 
   if ((config.largeScenario || config.writeScenario || config.adminScenario) && config.confirmed !== CONFIRMATION) {
     fail(`Set LOAD_TEST_CONFIRMED=${CONFIRMATION} to run this scenario.`);
+  }
+
+  if ((config.largeScenario || config.maxVus >= 100) && !config.participantGenerationEnabled) {
+    fail("Set LOAD_TEST_PARTICIPANT_GENERATION_ENABLED=true only for a dedicated staging/load-test fixture event.");
+  }
+
+  if (config.maxVus >= 5000 && (config.confirmHighLoad.toLowerCase() !== HIGH_LOAD_CONFIRMATION || !config.lowerStagesPassed)) {
+    fail("5,000+ VU stages require LOAD_TEST_CONFIRM_HIGH_LOAD=true and LOAD_TEST_LOWER_STAGES_PASSED=true.");
   }
 
   if (isProductionEnvironment(config) && (config.productionOverride !== PRODUCTION_CONFIRMATION || !config.allowProduction)) {
@@ -125,10 +160,13 @@ export function printConfig(config, extra = {}) {
     scenario: config.scenarioName,
     environment: config.environment,
     baseUrl: config.baseUrl,
+    targetHost: safeHost(config.targetUrl || config.baseUrl),
     supabaseUrlHost: safeHost(config.supabaseUrl),
     eventId: config.eventId,
     runId: config.runId,
     maxVus: config.maxVus,
+    stage: config.stage,
+    scenarioKind: config.scenarioKind,
     duration: config.duration,
     writeEnabled: config.writeEnabled,
     includePageLoad: config.includePageLoad,
@@ -156,6 +194,8 @@ export function commonThresholds() {
     submission_duration: ["p(95)<1500"],
     session_init_duration: ["p(95)<1500"],
     visibility_leak: ["count==0"],
+    pre_join_visibility_violation: ["count==0"],
+    stale_scope_incident: ["count==0"],
     duplicate_public_delivery: ["count==0"],
   };
 }

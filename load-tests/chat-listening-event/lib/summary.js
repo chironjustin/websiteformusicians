@@ -39,7 +39,12 @@ function humanSummary(summary) {
     metricLine(metrics, "intentional_rate_limit_rejections", "Intentional rate-limit rejections"),
     metricLine(metrics, "unexpected_submission_rejections", "Unexpected submission rejections"),
     metricLine(metrics, "visibility_leak", "Queued visibility leaks"),
+    metricLine(metrics, "pre_join_visibility_violation", "Pre-join visibility violations"),
     metricLine(metrics, "duplicate_public_delivery", "Duplicate public deliveries"),
+    metricLine(metrics, "delta_rpc_calls", "Delta RPC calls"),
+    metricLine(metrics, "zero_row_delta_responses", "Zero-row delta responses"),
+    metricLine(metrics, "delta_rows_returned", "Delta rows returned"),
+    metricLine(metrics, "controlled_publications", "Controlled public messages"),
     "",
   ];
   return `${lines.filter(Boolean).join("\n")}\n`;

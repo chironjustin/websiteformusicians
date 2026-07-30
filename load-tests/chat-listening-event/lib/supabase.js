@@ -10,11 +10,16 @@ import {
   pageLoadDuration,
   publicFetchDuration,
   queuedPrivateVisible,
+  deltaRpcCalls,
+  deltaRowsReturned,
+  preJoinVisibilityViolation,
+  controlledPublications,
   sessionInitDuration,
   submissionDuration,
   submissionUnexpectedFailed,
   unexpectedSubmissionRejections,
   visibilityLeak,
+  zeroRowDeltaResponses,
 } from "./metrics.js";
 import { uuidv4 } from "./random.js";
 
@@ -101,12 +106,22 @@ export function fetchVisibleMessages(config, identity, state = {}, tags = {}) {
   const elapsed = Date.now() - started;
   publicFetchDuration.add(elapsed);
   heartbeatDuration.add(elapsed);
+  deltaRpcCalls.add(1);
   const ok = res.status === 200;
   heartbeatFailed.add(!ok);
   check(res, { "visible message delta fetch ok": () => ok });
   if (!ok) return [];
   const messages = safeJson(res, []);
   if (!Array.isArray(messages)) return [];
+  if (messages.length === 0) zeroRowDeltaResponses.add(1);
+  deltaRowsReturned.add(messages.length);
+  if (!messages.every(message => (
+    message.visibility_scope === "own"
+    || !message.published_at
+    || message.published_at >= identity.joinedAt
+  ))) {
+    preJoinVisibilityViolation.add(1);
+  }
   advanceVisibleMessageCursors(messages, identity, state);
   return messages;
 }
@@ -147,6 +162,33 @@ export function submitMessage(config, identity, body, expectedRateLimit = false)
   submissionUnexpectedFailed.add(true);
   unexpectedSubmissionRejections.add(1);
   return { accepted: false, rateLimited, response: data, status: res.status, raw: safeText(res) };
+}
+
+export function insertAdminPublicMessage(config, body) {
+  const res = http.post(
+    `${config.supabaseUrl}/rest/v1/chat_messages?select=id,event_id,body,published_at,created_at,status`,
+    JSON.stringify({
+      event_id: config.eventId,
+      user_id: config.adminUserId,
+      display_name: `loadtest-${config.runId}`,
+      body,
+      status: "approved",
+      approval_source: "admin_direct",
+      is_admin: true,
+      is_pinned: false,
+      is_highlighted: false,
+      is_liked: false,
+    }),
+    {
+      headers: supabaseHeaders(config, { Prefer: "return=representation" }),
+      tags: { endpoint: "controlled_publication" },
+      timeout: "30s",
+    },
+  );
+  const ok = res.status >= 200 && res.status < 300;
+  check(res, { "controlled admin publication ok": () => ok });
+  if (ok) controlledPublications.add(1);
+  return res;
 }
 
 export function verifySenderPrivateVisible(config, identity, submittedMessage) {

@@ -30,6 +30,16 @@ export class ChatSubmissionError extends Error {
   }
 }
 
+export class ChatJoinError extends Error {
+  code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "ChatJoinError";
+    this.code = code;
+  }
+}
+
 type SubmitChatMessageResult =
   | { ok: true; message: VisitorSubmittedChatMessage; duplicate?: boolean }
   | { ok: false; code?: string; message?: string; retryAfterSeconds?: number };
@@ -184,6 +194,12 @@ export async function joinEventChatIdentity(input: { event_id: string; session_i
       code: error.code,
       elapsedMs: Math.round(performance.now() - startedAt),
     });
+    if (error.message.includes("chat_capacity_full")) {
+      throw new ChatJoinError(
+        "CHAT_CAPACITY_FULL",
+        "The live chat has reached its current capacity.",
+      );
+    }
     throw new Error("Could not join the chat. Please try again.");
   }
 

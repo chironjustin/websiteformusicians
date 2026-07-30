@@ -1,0 +1,63 @@
+{
+  "100": {
+    "concurrency": 100,
+    "requiresHighLoad": false,
+    "idleDuration": "5m",
+    "messageDuration": "5m",
+    "rampProfile": "gradual",
+    "rampUp": "2m",
+    "hold": "5m",
+    "rampDown": "1m",
+    "baselinePollSeconds": 10,
+    "expectedLowerStages": []
+  },
+  "500": {
+    "concurrency": 500,
+    "requiresHighLoad": false,
+    "idleDuration": "5m",
+    "messageDuration": "10m",
+    "rampProfile": "gradual",
+    "rampUp": "5m",
+    "hold": "10m",
+    "rampDown": "2m",
+    "baselinePollSeconds": 10,
+    "expectedLowerStages": ["100"]
+  },
+  "1000": {
+    "concurrency": 1000,
+    "requiresHighLoad": false,
+    "idleDuration": "10m",
+    "messageDuration": "15m",
+    "rampProfile": "gradual",
+    "rampUp": "5m",
+    "hold": "15m",
+    "rampDown": "2m",
+    "baselinePollSeconds": 10,
+    "expectedLowerStages": ["100", "500"]
+  },
+  "5000": {
+    "concurrency": 5000,
+    "requiresHighLoad": true,
+    "idleDuration": "5m",
+    "messageDuration": "10m",
+    "rampProfile": "gradual",
+    "rampUp": "10m",
+    "hold": "5m",
+    "rampDown": "3m",
+    "baselinePollSeconds": 10,
+    "expectedLowerStages": ["100", "500", "1000"]
+  },
+  "10000": {
+    "concurrency": 10000,
+    "requiresHighLoad": true,
+    "idleDuration": "5m",
+    "messageDuration": "10m",
+    "rampProfile": "gradual",
+    "rampUp": "15m",
+    "hold": "5m",
+    "rampDown": "5m",
+    "baselinePollSeconds": 10,
+    "expectedLowerStages": ["100", "500", "1000", "5000"]
+  }
+}
+

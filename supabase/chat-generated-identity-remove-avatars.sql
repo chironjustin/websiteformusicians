@@ -22,8 +22,7 @@ returns table (
   session_id uuid,
   display_name text,
   normalized_name text,
-  created_at timestamptz,
-  last_seen_at timestamptz
+  created_at timestamptz
 )
 language plpgsql
 security definer
@@ -82,11 +81,6 @@ begin
       where pool.is_active = true
         and pool.normalized_name = public.normalize_chat_name(existing_base_name)
     ) then
-      update public.event_chat_participants
-      set last_seen_at = now()
-      where event_chat_participants.id = existing_participant.id
-      returning * into existing_participant;
-
       return query
         select
           existing_participant.id,
@@ -94,8 +88,7 @@ begin
           existing_participant.session_id,
           existing_participant.display_name,
           existing_participant.normalized_name,
-          existing_participant.created_at,
-          existing_participant.last_seen_at;
+          existing_participant.created_at;
       return;
     end if;
 
@@ -103,11 +96,6 @@ begin
   end if;
 
   if existing_participant.id is not null and should_reassign_existing = false then
-    update public.event_chat_participants
-    set last_seen_at = now()
-    where event_chat_participants.id = existing_participant.id
-    returning * into existing_participant;
-
     return query
       select
         existing_participant.id,
@@ -115,8 +103,7 @@ begin
         existing_participant.session_id,
         existing_participant.display_name,
         existing_participant.normalized_name,
-        existing_participant.created_at,
-        existing_participant.last_seen_at;
+        existing_participant.created_at;
     return;
   end if;
 
@@ -154,8 +141,7 @@ begin
         if should_reassign_existing then
           update public.event_chat_participants
           set display_name = candidate_name,
-              normalized_name = normalized_candidate,
-              last_seen_at = now()
+              normalized_name = normalized_candidate
           where event_chat_participants.id = existing_participant.id
           returning * into inserted_participant;
         else
@@ -163,15 +149,13 @@ begin
             event_id,
             session_id,
             display_name,
-            normalized_name,
-            last_seen_at
+            normalized_name
           )
           values (
             p_event_id,
             p_session_id,
             candidate_name,
-            normalized_candidate,
-            now()
+            normalized_candidate
           )
           returning * into inserted_participant;
         end if;
@@ -183,8 +167,7 @@ begin
             inserted_participant.session_id,
             inserted_participant.display_name,
             inserted_participant.normalized_name,
-            inserted_participant.created_at,
-            inserted_participant.last_seen_at;
+            inserted_participant.created_at;
         return;
       exception
         when unique_violation then
@@ -203,8 +186,7 @@ begin
                 existing_participant.session_id,
                 existing_participant.display_name,
                 existing_participant.normalized_name,
-                existing_participant.created_at,
-                existing_participant.last_seen_at;
+                existing_participant.created_at;
             return;
           end if;
       end;

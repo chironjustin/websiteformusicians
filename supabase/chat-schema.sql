@@ -10,7 +10,6 @@ create table if not exists public.event_chat_participants (
   avatar_id text,
   joined_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
-  last_seen_at timestamptz not null default now(),
   constraint event_chat_participants_display_name_length check (char_length(display_name) between 1 and 16),
   constraint event_chat_participants_normalized_name_length check (char_length(normalized_name) between 1 and 16)
 );
@@ -701,8 +700,7 @@ returns table (
   display_name text,
   normalized_name text,
   created_at timestamptz,
-  joined_at timestamptz,
-  last_seen_at timestamptz
+  joined_at timestamptz
 )
 language plpgsql
 security definer
@@ -710,8 +708,11 @@ set search_path = public
 as $$
 declare
   event_artist_name text;
+  event_started_at timestamptz;
   existing_participant public.event_chat_participants;
   inserted_participant public.event_chat_participants;
+  admitted_count integer;
+  current_capacity integer;
   base_name text;
   base_normalized text;
   candidate_name text;
@@ -729,8 +730,8 @@ begin
     raise exception 'chat_session_required';
   end if;
 
-  select events.artist_name
-  into event_artist_name
+  select events.artist_name, events.starts_at
+  into event_artist_name, event_started_at
   from public.events
   where events.id = p_event_id
     and events.status in ('upcoming', 'live')
@@ -761,11 +762,6 @@ begin
       where pool.is_active = true
         and pool.normalized_name = public.normalize_chat_name(existing_base_name)
     ) then
-      update public.event_chat_participants
-      set last_seen_at = now()
-      where event_chat_participants.id = existing_participant.id
-      returning * into existing_participant;
-
       return query
         select
           existing_participant.id,
@@ -774,8 +770,7 @@ begin
           existing_participant.display_name,
           existing_participant.normalized_name,
           existing_participant.created_at,
-          existing_participant.joined_at,
-          existing_participant.last_seen_at;
+          existing_participant.joined_at;
       return;
     end if;
 
@@ -783,11 +778,6 @@ begin
   end if;
 
   if existing_participant.id is not null and should_reassign_existing = false then
-    update public.event_chat_participants
-    set last_seen_at = now()
-    where event_chat_participants.id = existing_participant.id
-    returning * into existing_participant;
-
     return query
       select
         existing_participant.id,
@@ -796,9 +786,26 @@ begin
         existing_participant.display_name,
         existing_participant.normalized_name,
         existing_participant.created_at,
-        existing_participant.joined_at,
-        existing_participant.last_seen_at;
+        existing_participant.joined_at;
     return;
+  end if;
+
+  if existing_participant.id is null then
+    perform pg_advisory_xact_lock(hashtext('chat-capacity:' || p_event_id::text));
+
+    select count(*)::integer
+    into admitted_count
+    from public.event_chat_participants
+    where event_chat_participants.event_id = p_event_id;
+
+    current_capacity := 1000 + greatest(
+      0,
+      floor(extract(epoch from (now() - event_started_at)) / 60)::integer
+    );
+
+    if admitted_count >= current_capacity then
+      raise exception 'chat_capacity_full';
+    end if;
   end if;
 
   for attempt in 1..25 loop
@@ -835,8 +842,7 @@ begin
         if should_reassign_existing then
           update public.event_chat_participants
           set display_name = candidate_name,
-              normalized_name = normalized_candidate,
-              last_seen_at = now()
+              normalized_name = normalized_candidate
           where event_chat_participants.id = existing_participant.id
           returning * into inserted_participant;
         else
@@ -845,15 +851,13 @@ begin
             session_id,
             display_name,
             normalized_name,
-            joined_at,
-            last_seen_at
+            joined_at
           )
           values (
             p_event_id,
             p_session_id,
             candidate_name,
             normalized_candidate,
-            now(),
             now()
           )
           returning * into inserted_participant;
@@ -867,8 +871,7 @@ begin
             inserted_participant.display_name,
             inserted_participant.normalized_name,
             inserted_participant.created_at,
-            inserted_participant.joined_at,
-            inserted_participant.last_seen_at;
+            inserted_participant.joined_at;
         return;
       exception
         when unique_violation then
@@ -888,8 +891,7 @@ begin
                 existing_participant.display_name,
                 existing_participant.normalized_name,
                 existing_participant.created_at,
-                existing_participant.joined_at,
-                existing_participant.last_seen_at;
+                existing_participant.joined_at;
             return;
           end if;
       end;

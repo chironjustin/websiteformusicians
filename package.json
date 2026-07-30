@@ -7,6 +7,11 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
+    "load:setup": "node load-tests/chat-listening-event/scripts/setup-run.mjs",
+    "load:test": "node load-tests/chat-listening-event/scripts/run-load-test.mjs",
+    "load:cleanup": "node load-tests/chat-listening-event/scripts/cleanup-run.mjs",
+    "load:report": "node load-tests/chat-listening-event/scripts/report-run.mjs",
+    "load:unit": "node load-tests/chat-listening-event/scripts/unit-checks.mjs",
     "loadtest:dry-run": "k6 run load-tests/chat-listening-event/scenarios/dry-run.js",
     "loadtest:check": "node scripts/check-load-tests.mjs",
     "loadtest:smoke": "k6 run load-tests/chat-listening-event/scenarios/smoke.js",

@@ -9,9 +9,14 @@ const serviceRoleKey = env("LOAD_TEST_SUPABASE_SERVICE_ROLE_KEY");
 const eventId = env("LOAD_TEST_EVENT_ID");
 const runId = env("LOAD_TEST_RUN_ID");
 const confirmed = env("LOAD_TEST_CLEANUP_CONFIRMED");
+const environment = env("LOAD_TEST_ENVIRONMENT");
 
 if (!supabaseUrl || !serviceRoleKey || !eventId || !runId) {
   throw new Error("Missing LOAD_TEST_SUPABASE_URL, LOAD_TEST_SUPABASE_SERVICE_ROLE_KEY, LOAD_TEST_EVENT_ID, or LOAD_TEST_RUN_ID.");
+}
+
+if (!["staging", "load-test"].includes(environment.toLowerCase())) {
+  throw new Error("Cleanup requires LOAD_TEST_ENVIRONMENT=staging or load-test.");
 }
 
 if (confirmed !== CONFIRMATION) {

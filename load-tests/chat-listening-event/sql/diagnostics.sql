@@ -130,6 +130,74 @@ where datname = current_database()
 group by state
 order by state;
 
+-- Realtime publication membership check.
+select
+  pubname,
+  schemaname,
+  tablename
+from pg_publication_tables
+where pubname = 'supabase_realtime'
+  and schemaname = 'public'
+  and tablename in ('events', 'chat_messages')
+order by tablename;
+
+-- Candidate indexes for the current chat read/write paths.
+select
+  schemaname,
+  tablename,
+  indexname,
+  indexdef
+from pg_indexes
+where schemaname = 'public'
+  and tablename in ('chat_messages', 'event_chat_participants', 'events')
+  and (
+    indexname ilike '%published%'
+    or indexname ilike '%updated%'
+    or indexname ilike '%participant%'
+    or indexname ilike '%queue%'
+    or indexname ilike '%client_token%'
+  )
+order by tablename, indexname;
+
+-- Recent API-visible publication rate by minute.
+select
+  date_trunc('minute', published_at) as minute,
+  count(*) as approved_public_messages
+from public.chat_messages
+where event_id = '<EVENT_ID>'
+  and status = 'approved'
+  and published_at > now() - interval '30 minutes'
+group by 1
+order by 1 desc;
+
+-- Cursor correctness inspection: messages with identical published_at values.
+select
+  published_at,
+  count(*) as messages_at_same_timestamp,
+  min(id) as first_id,
+  max(id) as last_id
+from public.chat_messages
+where event_id = '<EVENT_ID>'
+  and status = 'approved'
+  and published_at is not null
+group by published_at
+having count(*) > 1
+order by published_at desc
+limit 50;
+
+-- joined_at boundary sample. Replace <PARTICIPANT_ID> and <SESSION_ID>.
+select
+  count(*) filter (where chat_messages.published_at < participant.joined_at) as pre_join_rows_that_must_not_be_visible,
+  count(*) filter (where chat_messages.published_at >= participant.joined_at) as post_join_visible_candidates
+from public.event_chat_participants participant
+join public.chat_messages
+  on chat_messages.event_id = participant.event_id
+where participant.event_id = '<EVENT_ID>'
+  and participant.id = '<PARTICIPANT_ID>'
+  and participant.session_id = '<SESSION_ID>'
+  and chat_messages.status = 'approved'
+  and chat_messages.published_at is not null;
+
 -- Optional staging-only plan checks. These execute the query; do not run against production.
 -- explain (analyze, buffers)
 -- select *
@@ -146,3 +214,35 @@ order by state;
 --   and status = 'approved'
 --   and published_at >= now() - interval '10 minutes'
 -- order by published_at asc, id asc;
+--
+-- explain (analyze, buffers)
+-- select *
+-- from public.chat_messages
+-- where event_id = '<EVENT_ID>'
+--   and status = 'approved'
+--   and published_at is not null
+--   and published_at >= '<JOINED_AT>'::timestamptz
+--   and (
+--     published_at > '<CURSOR_PUBLISHED_AT>'::timestamptz
+--     or (
+--       published_at = '<CURSOR_PUBLISHED_AT>'::timestamptz
+--       and id > '<CURSOR_ID>'::uuid
+--     )
+--   )
+-- order by published_at asc, id asc
+-- limit 200;
+--
+-- explain (analyze, buffers)
+-- select *
+-- from public.chat_messages
+-- where event_id = '<EVENT_ID>'
+--   and participant_id = '<PARTICIPANT_ID>'
+--   and (
+--     updated_at > '<PRIVATE_CURSOR_UPDATED_AT>'::timestamptz
+--     or (
+--       updated_at = '<PRIVATE_CURSOR_UPDATED_AT>'::timestamptz
+--       and id > '<PRIVATE_CURSOR_ID>'::uuid
+--     )
+--   )
+-- order by updated_at asc, id asc
+-- limit 200;

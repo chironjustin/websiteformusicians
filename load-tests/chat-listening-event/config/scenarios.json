@@ -1,0 +1,45 @@
+{
+  "idle": {
+    "description": "Connected clients with Realtime subscription plus cursor-delta recovery, no message publishing.",
+    "writes": false,
+    "runner": "realtime",
+    "publicationRate": "none"
+  },
+  "publication": {
+    "description": "Controlled public-message publication fanout and delta-RPC measurement.",
+    "writes": true,
+    "runner": "hybrid",
+    "publicationRates": ["10s", "5s", "1s", "burst-10", "burst-50"]
+  },
+  "sender-private": {
+    "description": "Queued sender-private visibility and queued-to-public reconciliation sample.",
+    "writes": true,
+    "runner": "k6"
+  },
+  "joined-boundary": {
+    "description": "Joined-at boundary, active pin/highlight boundary, and reconnect refresh checks.",
+    "writes": true,
+    "runner": "k6"
+  },
+  "reconnect": {
+    "description": "Jittered Realtime disconnect/reconnect storm.",
+    "writes": false,
+    "runner": "realtime"
+  },
+  "foreground": {
+    "description": "Mobile-style visibility/focus/pageshow/online recovery storm model.",
+    "writes": false,
+    "runner": "realtime"
+  },
+  "degraded-realtime": {
+    "description": "Realtime unavailable/degraded behavior with bounded polling recovery.",
+    "writes": false,
+    "runner": "k6"
+  },
+  "scope-switch": {
+    "description": "Event/session changes while recovery requests are in flight.",
+    "writes": false,
+    "runner": "realtime"
+  }
+}
+
