@@ -119,7 +119,10 @@ begin
     from public.event_chat_participants
     where event_chat_participants.event_id = p_event_id;
 
-    current_capacity := 1000 + greatest(
+    -- TEMPORARY TESTING ONLY
+    -- Base capacity reduced from 1000 to 2.
+    -- Restore to 1000 before deploying to production.
+    current_capacity := 2 + greatest(
       0,
       floor(extract(epoch from (now() - event_started_at)) / 60)::integer
     );
