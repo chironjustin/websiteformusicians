@@ -18,10 +18,6 @@ const CHAT_SESSION_KEY = "music-event-chat-session-id";
 const MAX_ADMIN_DISPLAY_NAME = 50;
 const MAX_BODY = 500;
 const MAX_VISITOR_BODY = 400;
-const CHAT_JOIN_RPC = "join_event_chat_test";
-const CHAT_ADMISSION_STATUS_RPC = CHAT_JOIN_RPC === "join_event_chat_test"
-  ? "get_chat_admission_status_test"
-  : "get_chat_admission_status";
 
 export class ChatSubmissionError extends Error {
   code: string;
@@ -151,7 +147,7 @@ export async function getPublicChatMessageDelta(
 export async function getChatAdmissionStatus(input: { event_id: string; session_id?: string }) {
   assertEventId(input.event_id);
   const sessionId = input.session_id ?? getOrCreateChatSessionId();
-  const { data, error } = await supabase.rpc(CHAT_ADMISSION_STATUS_RPC, {
+  const { data, error } = await supabase.rpc("get_chat_admission_status", {
     p_event_id: input.event_id,
     p_session_id: sessionId,
   });
@@ -206,7 +202,7 @@ export async function joinEventChatIdentity(input: { event_id: string; session_i
   const sessionId = input.session_id ?? getOrCreateChatSessionId();
 
   const startedAt = performance.now();
-  const { data, error } = await supabase.rpc(CHAT_JOIN_RPC, {
+  const { data, error } = await supabase.rpc("join_event_chat", {
     p_event_id: input.event_id,
     p_session_id: sessionId,
   });
