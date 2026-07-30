@@ -162,7 +162,13 @@ export async function startEvent(id: string, latest?: UpdateEventInput) {
 }
 
 export async function endEvent(id: string) {
-  return updateEvent(id, { status: "finished", ends_at: new Date().toISOString() });
+  await requireUserId();
+  const { data, error } = await supabase.rpc("end_event_now", {
+    p_event_id: id,
+  });
+
+  if (error) throw toUsefulError(error, "Unable to end event.");
+  return data as MusicEvent;
 }
 
 export async function deleteEvent(id: string) {

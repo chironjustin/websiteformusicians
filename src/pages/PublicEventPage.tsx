@@ -1023,7 +1023,7 @@ export default function PublicEventPage() {
             storeChatIdentity(eventId, identity);
             setJoinedIdentity(identity);
           } else {
-            setChatAdmissionState("join");
+            setChatAdmissionState("error");
           }
           return;
         }
@@ -1034,7 +1034,7 @@ export default function PublicEventPage() {
           eventId,
           error: err instanceof Error ? err.message : String(err),
         });
-        if (!cancelled) setChatAdmissionState("join");
+        if (!cancelled) setChatAdmissionState("error");
       });
 
     return () => {
@@ -2049,7 +2049,7 @@ type JoinChatPanelVariant = "join" | "full";
 function JoinChatPanel({ eventId, eventTitle, listenerCount, admissionState, previewFull, onJoin, onListenerCount }: { eventId: string; eventTitle: string; listenerCount: number | null; admissionState: ChatAdmissionUiState; previewFull: boolean; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void }) {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
-  const checkingAdmission = admissionState === "idle" || admissionState === "loading";
+  const checkingAdmission = admissionState === "idle" || admissionState === "loading" || admissionState === "error";
   const [variant, setVariant] = useState<JoinChatPanelVariant>(previewFull || admissionState === "full" ? "full" : "join");
 
   useEffect(() => {

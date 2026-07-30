@@ -49,6 +49,24 @@ type SubmitChatMessageResult =
   | { ok: true; message: VisitorSubmittedChatMessage; duplicate?: boolean }
   | { ok: false; code?: string; message?: string; retryAfterSeconds?: number };
 
+function parseChatAdmissionStatus(data: unknown) {
+  const payload = Array.isArray(data) ? data[0] : data;
+  const parsed = typeof payload === "string" ? JSON.parse(payload) as unknown : payload;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Invalid chat admission status response.");
+  }
+  const status = parsed as Partial<ChatAdmissionStatus>;
+  if (
+    typeof status.already_joined !== "boolean" ||
+    typeof status.chat_full !== "boolean" ||
+    typeof status.admitted_count !== "number" ||
+    typeof status.current_capacity !== "number"
+  ) {
+    throw new Error("Invalid chat admission status response.");
+  }
+  return status as ChatAdmissionStatus;
+}
+
 function cleanText(value: string, maxLength: number) {
   return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
 }
@@ -150,16 +168,7 @@ export async function getChatAdmissionStatus(input: { event_id: string; session_
   });
 
   if (error) throw new Error(error.message);
-  const payload = data as Partial<ChatAdmissionStatus> | null;
-  if (
-    typeof payload?.already_joined !== "boolean" ||
-    typeof payload.chat_full !== "boolean" ||
-    typeof payload.admitted_count !== "number" ||
-    typeof payload.current_capacity !== "number"
-  ) {
-    throw new Error("Invalid chat admission status response.");
-  }
-  return payload as ChatAdmissionStatus;
+  return parseChatAdmissionStatus(data);
 }
 
 export async function getAdminChatMessages(eventId: string) {
