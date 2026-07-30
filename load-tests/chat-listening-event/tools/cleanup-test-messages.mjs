@@ -38,4 +38,4 @@ if (!response.ok) {
 }
 
 console.log(`Deleted ${Array.isArray(payload) ? payload.length : 0} synthetic chat_messages for run ${runId}.`);
-console.log("Participant rows were intentionally left intact because generated-name rows are listener analytics.");
+console.log("Participant rows were intentionally left intact because they represent permanent chat admissions.");

@@ -1,6 +1,6 @@
 import { check, sleep } from "k6";
 import exec from "k6/execution";
-import { getEvent, getListenerCount, joinChat, loadPublicPage, probeAudio, detectDuplicatePublicDelivery, fetchVisibleMessages, submitMessage, verifyNoQueuedLeak, verifySenderPrivateVisible } from "./supabase.js";
+import { getEvent, joinChat, loadPublicPage, probeAudio, detectDuplicatePublicDelivery, fetchVisibleMessages, submitMessage, verifyNoQueuedLeak, verifySenderPrivateVisible } from "./supabase.js";
 import { jitter, messageBody, pickProfile, shouldSubmitForProfile, uuidv4, weightedDelayInWindow } from "./random.js";
 import { duplicatePublicDelivery } from "./metrics.js";
 
@@ -24,10 +24,6 @@ export function listenerIteration(config, data, behavior = "mixed") {
   const messages = fetchVisibleMessages(config, state.identity, state);
   if (detectDuplicatePublicDelivery(messages, state.seenPublicMessages)) {
     duplicatePublicDelivery.add(1);
-  }
-
-  if (state.iteration % config.listenerCountRefreshEvery === 0) {
-    getListenerCount(config);
   }
 
   if (config.includeAudioProbe && state.iteration === 0) {
@@ -160,6 +156,6 @@ function printRunHeader(config) {
     duration: config.duration,
     writeEnabled: config.writeEnabled,
     audioProbeEnabled: config.includeAudioProbe,
-    expectedRequestPattern: "page load once per VU, join RPC once per VU, cutoff-aware message fetch approximately every heartbeat interval, listener-count fetch periodically, optional legal chat submissions by profile",
+    expectedRequestPattern: "page load once per VU, join RPC once per VU, cutoff-aware message fetch approximately every heartbeat interval, optional legal chat submissions by profile",
   }, null, 2));
 }

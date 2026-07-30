@@ -6,7 +6,6 @@ export const submissionDuration = new Trend("submission_duration", true);
 export const submissionUnexpectedFailed = new Rate("submission_unexpected_failed");
 export const sessionInitDuration = new Trend("session_init_duration", true);
 export const publicFetchDuration = new Trend("public_message_fetch_duration", true);
-export const listenerCountDuration = new Trend("listener_count_duration", true);
 export const acceptedSubmissions = new Counter("accepted_submissions");
 export const intentionalRateLimits = new Counter("intentional_rate_limit_rejections");
 export const unexpectedSubmissionRejections = new Counter("unexpected_submission_rejections");

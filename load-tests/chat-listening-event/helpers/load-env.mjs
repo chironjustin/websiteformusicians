@@ -157,7 +157,6 @@ export function estimateWorkload(context) {
   const pollingRps = clients / pollSeconds;
   const totalPollingRequests = Math.round(pollingRps * seconds);
   const joinRequests = clients;
-  const listenerCountRequests = Math.ceil(clients * seconds / (pollSeconds * 20));
   return {
     duration,
     seconds,
@@ -167,7 +166,6 @@ export function estimateWorkload(context) {
     estimatedBaselinePollingRps: Number(pollingRps.toFixed(2)),
     estimatedPollingRequests: totalPollingRequests,
     estimatedJoinRequests: joinRequests,
-    estimatedListenerCountRequests: listenerCountRequests,
     estimatedOneMessageImmediateHerdRpcCalls: clients,
     estimatedOneMessageWithPerfectCoalescingRpcCalls: clients,
     estimatedAudioDownloads: env("LOAD_TEST_AUDIO_PROBE_ENABLED") === "true" ? clients : 0,
@@ -245,4 +243,3 @@ export function k6ScenarioFor(context) {
   if (context.scenario === "publication") return "publication.js";
   return "stage.js";
 }
-

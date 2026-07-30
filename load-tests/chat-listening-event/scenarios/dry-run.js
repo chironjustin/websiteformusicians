@@ -1,7 +1,7 @@
 import { check } from "k6";
 import { buildConfig, printConfig } from "../lib/config.js";
 import { makeSummary } from "../lib/summary.js";
-import { getEvent, getListenerCount, loadPublicPage } from "../lib/supabase.js";
+import { getEvent, loadPublicPage } from "../lib/supabase.js";
 
 const config = buildConfig("dry-run", { vus: 1, duration: "1s", writeScenario: false, largeScenario: false });
 printConfig(config, { dryRun: true, writes: "none" });
@@ -22,7 +22,6 @@ export default function() {
     "dry-run target event exists": value => Boolean(value?.id),
     "dry-run event id matches": value => value?.id === config.eventId,
   });
-  const listeners = getListenerCount(config);
   console.log(JSON.stringify({
     dryRun: true,
     eventId: config.eventId,
@@ -31,7 +30,6 @@ export default function() {
     endsAt: event?.ends_at,
     autoPublishEnabled: event?.auto_publish_enabled,
     queuePaused: event?.queue_paused,
-    listenerCount: listeners,
     estimatedLargeTestWarning: "10k scenarios are not run by dry-run. Review Supabase/Vercel limits before setting confirmation variables.",
   }, null, 2));
 }

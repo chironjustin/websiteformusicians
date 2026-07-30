@@ -7,7 +7,6 @@ import {
   ChatSubmissionError,
   ChatJoinError,
   getChatAdmissionStatus,
-  getEventListenerCount,
   joinEventChatIdentity,
   sendVisitorMessage,
 } from "@/services/chatService";
@@ -977,7 +976,6 @@ export default function PublicEventPage() {
   const authoritativeState = event?.status ?? "upcoming";
   const waitingForLiveStatus = state === "live" && authoritativeState === "upcoming";
   const [joinedIdentity, setJoinedIdentity] = useState<JoinedChatIdentity | null>(null);
-  const [listenerCount, setListenerCount] = useState<number | null>(null);
   const [chatAdmissionState, setChatAdmissionState] = useState<ChatAdmissionUiState>("idle");
   const [admissionRefreshKey, setAdmissionRefreshKey] = useState(0);
   const chatViewer = useMemo(() => joinedIdentity ? {
@@ -1059,35 +1057,6 @@ export default function PublicEventPage() {
       window.removeEventListener("pageshow", recheckAdmission);
     };
   }, [event?.id, joinedIdentity, state]);
-
-  useEffect(() => {
-    const eventId = event?.id;
-    if (!eventId || state !== "live") {
-      setListenerCount(null);
-      return;
-    }
-
-    let cancelled = false;
-    async function loadListenerCount() {
-      try {
-        const count = await getEventListenerCount(eventId);
-        if (!cancelled) setListenerCount(count);
-      } catch (err) {
-        console.warn("[live-chat-listeners]", {
-          eventId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        if (!cancelled) setListenerCount(null);
-      }
-    }
-
-    loadListenerCount();
-    const id = window.setInterval(loadListenerCount, 10000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [event?.id, state]);
 
   useEffect(() => {
     const currentEventId = event?.id ?? null;
@@ -1660,11 +1629,9 @@ export default function PublicEventPage() {
           eventId={event.id}
           messages={chat.messages}
           chatError={chat.error}
-          listenerCount={listenerCount}
           chatAdmissionState={chatAdmissionState}
           joinedIdentity={joinedIdentity}
           onJoin={setJoinedIdentity}
-          onListenerCount={setListenerCount}
           onMessageSubmitted={chat.refetch}
           live={authoritativeState === "live"}
           starting={waitingForLiveStatus}
@@ -1824,7 +1791,7 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
   );
 }
 
-function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, chatError, listenerCount, chatAdmissionState, joinedIdentity, onJoin, onListenerCount, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; chatError: string | null; listenerCount: number | null; chatAdmissionState: ChatAdmissionUiState; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
+function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, chatError, chatAdmissionState, joinedIdentity, onJoin, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; chatError: string | null; chatAdmissionState: ChatAdmissionUiState; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
   const stageScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -1885,11 +1852,11 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
             )}
             {joinedIdentity ? (
               <>
-                <LiveMessageStream messages={messages} eventId={eventId} artistName={artistName} artistUrl={artistUrl} listenerCount={listenerCount} chatError={chatError} />
+                <LiveMessageStream messages={messages} eventId={eventId} artistName={artistName} artistUrl={artistUrl} chatError={chatError} />
                 <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
               </>
             ) : (
-              <JoinChatPanel eventId={eventId} eventTitle={title} listenerCount={listenerCount} admissionState={chatAdmissionState} previewFull={isLocalChatFullPreviewEnabled()} onJoin={onJoin} onListenerCount={onListenerCount} />
+              <JoinChatPanel eventId={eventId} eventTitle={title} admissionState={chatAdmissionState} previewFull={isLocalChatFullPreviewEnabled()} onJoin={onJoin} />
             )}
           </div>
         </LiveChatErrorBoundary>
@@ -1912,7 +1879,7 @@ function LiveAudioHeader({ title, audioUrl, audioSourceStatus, audioPipelineDiag
   );
 }
 
-function LiveMessageStream({ messages, eventId, artistName, artistUrl, listenerCount, chatError }: { messages: ChatMessage[]; eventId: string; artistName: string; artistUrl: string; listenerCount: number | null; chatError: string | null }) {
+function LiveMessageStream({ messages, eventId, artistName, artistUrl, chatError }: { messages: ChatMessage[]; eventId: string; artistName: string; artistUrl: string; chatError: string | null }) {
   const pinnedMessage = messages.find(message => message.is_pinned && message.status === "approved");
   const feedMessages = pinnedMessage ? messages.filter(message => message.id !== pinnedMessage.id) : messages;
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -1958,7 +1925,6 @@ function LiveMessageStream({ messages, eventId, artistName, artistUrl, listenerC
     <section className="live-chat-stream--joined" style={{ opacity: messages.length > 0 ? 1 : 0.9 }}>
       <div className="live-chat__header">
         <p style={{ fontFamily: VT, color: GREEN, fontSize: "1.45rem", letterSpacing: "0.22em" }}>live chat</p>
-        <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.4)", fontSize: "1.05rem", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>listeners: {listenerCount ?? "—"}</p>
       </div>
       {chatError && <ChatUnavailableNotice />}
       {pinnedMessage && (
@@ -2046,7 +2012,7 @@ function ArtistLikeIndicator({ artistUrl }: { artistUrl: string }) {
 
 type JoinChatPanelVariant = "join" | "full";
 
-function JoinChatPanel({ eventId, eventTitle, listenerCount, admissionState, previewFull, onJoin, onListenerCount }: { eventId: string; eventTitle: string; listenerCount: number | null; admissionState: ChatAdmissionUiState; previewFull: boolean; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void }) {
+function JoinChatPanel({ eventId, eventTitle, admissionState, previewFull, onJoin }: { eventId: string; eventTitle: string; admissionState: ChatAdmissionUiState; previewFull: boolean; onJoin: (identity: JoinedChatIdentity) => void }) {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
   const checkingAdmission = admissionState === "idle" || admissionState === "loading" || admissionState === "error";
@@ -2071,7 +2037,6 @@ function JoinChatPanel({ eventId, eventTitle, listenerCount, admissionState, pre
         joinedAt: participant.joined_at,
       };
       storeChatIdentity(eventId, identity);
-      getEventListenerCount(eventId).then(onListenerCount).catch(() => undefined);
       console.info("[live-chat-join-state]", {
         eventId,
         joined: true,
@@ -2114,9 +2079,7 @@ function JoinChatPanel({ eventId, eventTitle, listenerCount, admissionState, pre
           <p style={{ fontFamily: VT, color: content.descriptionColor, fontSize: "1.05rem", lineHeight: 1.18, letterSpacing: "0.04em", margin: 0, whiteSpace: "pre-line" }}>
             {content.description}
           </p>
-        ) : (
-          <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.45)", fontSize: "1.05rem", letterSpacing: "0.1em", margin: 0 }}>listeners: {listenerCount ?? "—"}</p>
-        )}
+        ) : null}
       </div>
       {variant === "join" && !checkingAdmission && (
         <button disabled={joining} style={enterButtonStyle}>

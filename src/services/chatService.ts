@@ -148,17 +148,6 @@ export async function getPublicChatMessageDelta(
   return (data ?? []) as VisitorChatMessageDelta[];
 }
 
-export async function getEventListenerCount(eventId: string) {
-  assertEventId(eventId);
-  const { data, error } = await supabase.rpc("get_event_listener_count", {
-    p_event_id: eventId,
-  });
-
-  if (error) throw new Error(error.message);
-  const payload = data as { count?: number } | null;
-  return typeof payload?.count === "number" ? payload.count : 0;
-}
-
 export async function getChatAdmissionStatus(input: { event_id: string; session_id?: string }) {
   assertEventId(input.event_id);
   const sessionId = input.session_id ?? getOrCreateChatSessionId();

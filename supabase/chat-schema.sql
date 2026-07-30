@@ -322,26 +322,6 @@ $$;
 revoke all on function public.get_visitor_chat_message_status(uuid, uuid, uuid) from public;
 grant execute on function public.get_visitor_chat_message_status(uuid, uuid, uuid) to anon, authenticated;
 
-create or replace function public.get_event_listener_count(p_event_id uuid)
-returns jsonb
-language sql
-stable
-security definer
-set search_path = pg_catalog, public
-as $$
-  select jsonb_build_object(
-    'count',
-    coalesce((
-      select count(*)::integer
-      from public.event_chat_participants
-      where event_chat_participants.event_id = p_event_id
-    ), 0)
-  );
-$$;
-
-revoke all on function public.get_event_listener_count(uuid) from public;
-grant execute on function public.get_event_listener_count(uuid) to anon, authenticated;
-
 create or replace function public.get_visitor_visible_chat_messages(
   p_event_id uuid,
   p_participant_id uuid,

@@ -6,7 +6,6 @@ import {
   heartbeatDuration,
   heartbeatFailed,
   intentionalRateLimits,
-  listenerCountDuration,
   pageLoadDuration,
   publicFetchDuration,
   queuedPrivateVisible,
@@ -124,15 +123,6 @@ export function fetchVisibleMessages(config, identity, state = {}, tags = {}) {
   }
   advanceVisibleMessageCursors(messages, identity, state);
   return messages;
-}
-
-export function getListenerCount(config) {
-  const started = Date.now();
-  const res = rpc(config, "get_event_listener_count", { p_event_id: config.eventId }, { endpoint: "listener_count" });
-  listenerCountDuration.add(Date.now() - started);
-  check(res, { "listener count ok": r => r.status === 200 });
-  const data = safeJson(res, {});
-  return typeof data?.count === "number" ? data.count : 0;
 }
 
 export function submitMessage(config, identity, body, expectedRateLimit = false) {

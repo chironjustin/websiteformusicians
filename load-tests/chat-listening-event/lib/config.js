@@ -62,7 +62,6 @@ export function buildConfig(scenarioName, defaults) {
     includeAudioProbe: getBool("LOAD_TEST_AUDIO_PROBE_ENABLED", false),
     includeRealtime: getBool("LOAD_TEST_REALTIME_ENABLED", false),
     heartbeatIntervalSeconds: getFloat("LOAD_TEST_HEARTBEAT_INTERVAL_SECONDS", 3),
-    listenerCountRefreshEvery: getInt("LOAD_TEST_LISTENER_COUNT_EVERY", 20),
     messageFetchEvery: getInt("LOAD_TEST_MESSAGE_FETCH_EVERY", 1),
     messagePageLimit: getInt("LOAD_TEST_MESSAGE_PAGE_LIMIT", 200),
     maxVus: getInt("LOAD_TEST_MAX_VUS", defaults.vus ?? defaults.maxVus ?? 10),
