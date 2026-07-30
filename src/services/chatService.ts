@@ -182,7 +182,7 @@ export async function joinEventChatIdentity(input: { event_id: string; session_i
   const sessionId = input.session_id ?? getOrCreateChatSessionId();
 
   const startedAt = performance.now();
-  const { data, error } = await supabase.rpc("join_event_chat", {
+  const { data, error } = await supabase.rpc("join_event_chat_test", {
     p_event_id: input.event_id,
     p_session_id: sessionId,
   });

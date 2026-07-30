@@ -1,3 +1,7 @@
+-- TEST ONLY
+-- DO NOT DEPLOY TO PRODUCTION
+-- This function exists only to test a base chat capacity of 2.
+
 -- Permanent live-chat capacity for event participant admission.
 --
 -- This is not a waiting room. Existing event/session participants keep chat
@@ -8,9 +12,9 @@
 --
 -- No cron is required; capacity is calculated inside join_event_chat.
 
-drop function if exists public.join_event_chat(uuid, uuid);
+drop function if exists public.join_event_chat_test(uuid, uuid);
 
-create or replace function public.join_event_chat(
+create or replace function public.join_event_chat_test(
   p_event_id uuid,
   p_session_id uuid
 )
@@ -119,7 +123,10 @@ begin
     from public.event_chat_participants
     where event_chat_participants.event_id = p_event_id;
 
-    current_capacity := 1000 + greatest(
+    -- TEMPORARY TESTING ONLY
+    -- Base capacity reduced from 1000 to 2.
+    -- Restore to 1000 before deploying to production.
+    current_capacity := 2 + greatest(
       0,
       floor(extract(epoch from (now() - event_started_at)) / 60)::integer
     );
@@ -223,8 +230,8 @@ begin
 end;
 $$;
 
-revoke all on function public.join_event_chat(uuid, uuid) from public;
-grant execute on function public.join_event_chat(uuid, uuid) to anon, authenticated;
+revoke all on function public.join_event_chat_test(uuid, uuid) from public;
+grant execute on function public.join_event_chat_test(uuid, uuid) to anon, authenticated;
 
 notify pgrst, 'reload schema';
 
