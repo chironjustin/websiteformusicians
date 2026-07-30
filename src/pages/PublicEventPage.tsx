@@ -6,6 +6,7 @@ import { useCurrentEvent } from "@/hooks/useCurrentEvent";
 import {
   ChatSubmissionError,
   ChatJoinError,
+  getChatAdmissionStatus,
   getEventListenerCount,
   joinEventChatIdentity,
   sendVisitorMessage,
@@ -98,6 +99,8 @@ type JoinedChatIdentity = {
   displayName: string;
   joinedAt: string;
 };
+
+type ChatAdmissionUiState = "idle" | "loading" | "join" | "full" | "error";
 
 function pad2(value: number) {
   return String(Math.floor(value)).padStart(2, "0");
@@ -975,6 +978,8 @@ export default function PublicEventPage() {
   const waitingForLiveStatus = state === "live" && authoritativeState === "upcoming";
   const [joinedIdentity, setJoinedIdentity] = useState<JoinedChatIdentity | null>(null);
   const [listenerCount, setListenerCount] = useState<number | null>(null);
+  const [chatAdmissionState, setChatAdmissionState] = useState<ChatAdmissionUiState>("idle");
+  const [admissionRefreshKey, setAdmissionRefreshKey] = useState(0);
   const chatViewer = useMemo(() => joinedIdentity ? {
     participantId: joinedIdentity.participantId,
     sessionId: joinedIdentity.sessionId,
@@ -994,6 +999,66 @@ export default function PublicEventPage() {
   useEffect(() => {
     setJoinedIdentity(event?.id ? readStoredChatIdentity(event.id) : null);
   }, [event?.id]);
+
+  useEffect(() => {
+    const eventId = event?.id;
+    if (!eventId || state !== "live" || joinedIdentity) {
+      setChatAdmissionState("idle");
+      return;
+    }
+
+    let cancelled = false;
+    setChatAdmissionState("loading");
+    getChatAdmissionStatus({ event_id: eventId })
+      .then((status) => {
+        if (cancelled) return;
+        if (status.already_joined) {
+          if (status.participant_id && status.session_id && status.display_name && isValidServerTimestamp(status.joined_at)) {
+            const identity = {
+              participantId: status.participant_id,
+              sessionId: status.session_id,
+              displayName: status.display_name,
+              joinedAt: status.joined_at,
+            };
+            storeChatIdentity(eventId, identity);
+            setJoinedIdentity(identity);
+          } else {
+            setChatAdmissionState("join");
+          }
+          return;
+        }
+        setChatAdmissionState(status.chat_full ? "full" : "join");
+      })
+      .catch((err) => {
+        console.warn("[live-chat-admission-status]", {
+          eventId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        if (!cancelled) setChatAdmissionState("join");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [admissionRefreshKey, event?.id, joinedIdentity, state]);
+
+  useEffect(() => {
+    const eventId = event?.id;
+    if (!eventId || state !== "live" || joinedIdentity) return;
+
+    const recheckAdmission = () => {
+      if (document.visibilityState === "visible") {
+        setAdmissionRefreshKey((value) => value + 1);
+      }
+    };
+
+    document.addEventListener("visibilitychange", recheckAdmission);
+    window.addEventListener("pageshow", recheckAdmission);
+    return () => {
+      document.removeEventListener("visibilitychange", recheckAdmission);
+      window.removeEventListener("pageshow", recheckAdmission);
+    };
+  }, [event?.id, joinedIdentity, state]);
 
   useEffect(() => {
     const eventId = event?.id;
@@ -1596,6 +1661,7 @@ export default function PublicEventPage() {
           messages={chat.messages}
           chatError={chat.error}
           listenerCount={listenerCount}
+          chatAdmissionState={chatAdmissionState}
           joinedIdentity={joinedIdentity}
           onJoin={setJoinedIdentity}
           onListenerCount={setListenerCount}
@@ -1758,7 +1824,7 @@ function BouncingArtistPortrait({ imageUrl }: { imageUrl: string }) {
   );
 }
 
-function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, chatError, listenerCount, joinedIdentity, onJoin, onListenerCount, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; chatError: string | null; listenerCount: number | null; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
+function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStatus, audioPipelineDiagnostics, startsAt, liveTarget, eventId, messages, chatError, listenerCount, chatAdmissionState, joinedIdentity, onJoin, onListenerCount, onMessageSubmitted, live, starting }: { title: string; artistName: string; artistUrl: string; audioUrl: string; audioSourceStatus: AudioSourceStatus; audioPipelineDiagnostics: AudioUrlPipelineDiagnostics; startsAt: string | null; liveTarget: string | null; eventId: string; messages: ChatMessage[]; chatError: string | null; listenerCount: number | null; chatAdmissionState: ChatAdmissionUiState; joinedIdentity: JoinedChatIdentity | null; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void; onMessageSubmitted: () => void | Promise<void>; live: boolean; starting: boolean }) {
   const stageScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -1823,7 +1889,7 @@ function LiveEventView({ title, artistName, artistUrl, audioUrl, audioSourceStat
                 <ActiveChatComposer eventId={eventId} identity={joinedIdentity} live={live} starting={starting} onMessageSubmitted={onMessageSubmitted} />
               </>
             ) : (
-              <JoinChatPanel eventId={eventId} eventTitle={title} listenerCount={listenerCount} previewFull={isLocalChatFullPreviewEnabled()} onJoin={onJoin} onListenerCount={onListenerCount} />
+              <JoinChatPanel eventId={eventId} eventTitle={title} listenerCount={listenerCount} admissionState={chatAdmissionState} previewFull={isLocalChatFullPreviewEnabled()} onJoin={onJoin} onListenerCount={onListenerCount} />
             )}
           </div>
         </LiveChatErrorBoundary>
@@ -1980,15 +2046,16 @@ function ArtistLikeIndicator({ artistUrl }: { artistUrl: string }) {
 
 type JoinChatPanelVariant = "join" | "full";
 
-function JoinChatPanel({ eventId, eventTitle, listenerCount, previewFull, onJoin, onListenerCount }: { eventId: string; eventTitle: string; listenerCount: number | null; previewFull: boolean; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void }) {
+function JoinChatPanel({ eventId, eventTitle, listenerCount, admissionState, previewFull, onJoin, onListenerCount }: { eventId: string; eventTitle: string; listenerCount: number | null; admissionState: ChatAdmissionUiState; previewFull: boolean; onJoin: (identity: JoinedChatIdentity) => void; onListenerCount: (count: number) => void }) {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
-  const [variant, setVariant] = useState<JoinChatPanelVariant>(previewFull ? "full" : "join");
+  const checkingAdmission = admissionState === "idle" || admissionState === "loading";
+  const [variant, setVariant] = useState<JoinChatPanelVariant>(previewFull || admissionState === "full" ? "full" : "join");
 
   useEffect(() => {
-    setVariant(previewFull ? "full" : "join");
+    setVariant(previewFull || admissionState === "full" ? "full" : "join");
     setError("");
-  }, [previewFull]);
+  }, [admissionState, previewFull]);
 
   async function join(event: React.FormEvent) {
     event.preventDefault();
@@ -2023,7 +2090,7 @@ function JoinChatPanel({ eventId, eventTitle, listenerCount, previewFull, onJoin
     }
   }
 
-  const content = getJoinChatPanelContent(variant, eventTitle);
+  const content = checkingAdmission ? getCheckingChatPanelContent() : getJoinChatPanelContent(variant, eventTitle);
   const contentStyle: React.CSSProperties = variant === "full"
     ? {
       textAlign: "center",
@@ -2051,7 +2118,7 @@ function JoinChatPanel({ eventId, eventTitle, listenerCount, previewFull, onJoin
           <p style={{ fontFamily: VT, color: "rgba(0,255,65,0.45)", fontSize: "1.05rem", letterSpacing: "0.1em", margin: 0 }}>listeners: {listenerCount ?? "—"}</p>
         )}
       </div>
-      {variant === "join" && (
+      {variant === "join" && !checkingAdmission && (
         <button disabled={joining} style={enterButtonStyle}>
           {content.buttonLabel}
         </button>
@@ -2081,6 +2148,16 @@ function getJoinChatPanelContent(variant: JoinChatPanelVariant, eventTitle: stri
     title: "join chat",
     description: "",
     buttonLabel: "[ join ]",
+    titleColor: "#FFFFFF",
+    descriptionColor: "rgba(0,255,65,0.45)",
+  };
+}
+
+function getCheckingChatPanelContent() {
+  return {
+    title: "checking chat",
+    description: "checking live chat capacity.",
+    buttonLabel: "",
     titleColor: "#FFFFFF",
     descriptionColor: "rgba(0,255,65,0.45)",
   };

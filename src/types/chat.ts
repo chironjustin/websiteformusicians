@@ -75,6 +75,17 @@ export interface ChatParticipant {
   joined_at: string;
 }
 
+export interface ChatAdmissionStatus {
+  already_joined: boolean;
+  chat_full: boolean;
+  admitted_count: number;
+  current_capacity: number;
+  participant_id?: string | null;
+  session_id?: string | null;
+  display_name?: string | null;
+  joined_at?: string | null;
+}
+
 export interface CreateVisitorChatMessageInput {
   event_id: string;
   participant_id: string;

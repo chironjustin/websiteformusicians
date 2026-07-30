@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import type {
   ChatMessage,
   ChatMessageStatus,
+  ChatAdmissionStatus,
   ChatParticipant,
   CreateAdminChatMessageInput,
   CreateVisitorChatMessageInput,
@@ -17,6 +18,10 @@ const CHAT_SESSION_KEY = "music-event-chat-session-id";
 const MAX_ADMIN_DISPLAY_NAME = 50;
 const MAX_BODY = 500;
 const MAX_VISITOR_BODY = 400;
+const CHAT_JOIN_RPC = "join_event_chat_test";
+const CHAT_ADMISSION_STATUS_RPC = CHAT_JOIN_RPC === "join_event_chat_test"
+  ? "get_chat_admission_status_test"
+  : "get_chat_admission_status";
 
 export class ChatSubmissionError extends Error {
   code: string;
@@ -136,6 +141,27 @@ export async function getEventListenerCount(eventId: string) {
   return typeof payload?.count === "number" ? payload.count : 0;
 }
 
+export async function getChatAdmissionStatus(input: { event_id: string; session_id?: string }) {
+  assertEventId(input.event_id);
+  const sessionId = input.session_id ?? getOrCreateChatSessionId();
+  const { data, error } = await supabase.rpc(CHAT_ADMISSION_STATUS_RPC, {
+    p_event_id: input.event_id,
+    p_session_id: sessionId,
+  });
+
+  if (error) throw new Error(error.message);
+  const payload = data as Partial<ChatAdmissionStatus> | null;
+  if (
+    typeof payload?.already_joined !== "boolean" ||
+    typeof payload.chat_full !== "boolean" ||
+    typeof payload.admitted_count !== "number" ||
+    typeof payload.current_capacity !== "number"
+  ) {
+    throw new Error("Invalid chat admission status response.");
+  }
+  return payload as ChatAdmissionStatus;
+}
+
 export async function getAdminChatMessages(eventId: string) {
   const { data, error } = await adminMessagesQuery()
     .eq("event_id", eventId)
@@ -182,7 +208,7 @@ export async function joinEventChatIdentity(input: { event_id: string; session_i
   const sessionId = input.session_id ?? getOrCreateChatSessionId();
 
   const startedAt = performance.now();
-  const { data, error } = await supabase.rpc("join_event_chat_test", {
+  const { data, error } = await supabase.rpc(CHAT_JOIN_RPC, {
     p_event_id: input.event_id,
     p_session_id: sessionId,
   });
