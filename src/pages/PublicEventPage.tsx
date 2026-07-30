@@ -307,7 +307,7 @@ function GlobalStyles() {
 
 function CRTOverlay() {
   return (
-    <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 997 }}>
+    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 997 }}>
       <div style={{
         position: "absolute",
         inset: 0,
